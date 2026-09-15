@@ -480,7 +480,7 @@ Item {
                                     anchors.fill: parent
                                     anchors.leftMargin: Kirigami.Units.largeSpacing
                                     verticalAlignment: Text.AlignVCenter
-                                    text: model.name
+                                    text: root.draggedCategoryData ? root.draggedCategoryData.name : model.name
                                     font.bold: true
                                     elide: Text.ElideRight
                                 }
@@ -580,13 +580,13 @@ Item {
                                         Rectangle {
                                             Layout.fillHeight: true
                                             Layout.preferredWidth: Kirigami.Units.smallSpacing
-                                            color: model.categoryColor
+                                            color: root.draggedTaskData ? root.draggedTaskData.categoryColor : model.categoryColor
                                             radius: width / 2
                                         }
 
                                         PlasmaComponents.Label {
                                             Layout.fillWidth: true
-                                            text: model.title
+                                            text: root.draggedTaskData ? root.draggedTaskData.title : model.title
                                             font.bold: true
                                             elide: Text.ElideRight
                                         }
