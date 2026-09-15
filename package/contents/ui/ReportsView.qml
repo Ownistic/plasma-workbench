@@ -13,6 +13,7 @@ Controls.Dialog {
     id: root
 
     required property var board
+    parent: root.board
     property bool monthly: false
     property int year: 0
     property int month: 0
@@ -279,7 +280,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: breakdownDialog
-        parent: root.parent
+        parent: root.contentItem
         modal: true
         title: i18n("Task breakdown")
         standardButtons: Controls.Dialog.Close

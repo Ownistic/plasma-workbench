@@ -12,6 +12,7 @@ Controls.Dialog {
     id: root
 
     required property var board
+    parent: root.board
     property string taskId: ""
     property var task: null
     readonly property bool hasManualCorrections: root.task && (
@@ -433,7 +434,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: correctionDeletion
-        parent: root.parent
+        parent: root.contentItem
         modal: true
         property string kind: ""
         property string itemId: ""
@@ -462,12 +463,11 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: workSessionEditor
-        parent: root.parent
+        parent: root.contentItem
         modal: true
         property var session: null
         property string timezoneId: ""
         property bool longSessionConfirmed: false
-        standardButtons: 0
         onOpened: {
             longSessionConfirmed = false
             root.refreshOffsetChoices()
@@ -501,7 +501,7 @@ Controls.Dialog {
             PlasmaComponents.ComboBox {
                 id: workSessionStartOffset
                 Layout.fillWidth: true
-                visible: model.length > 1
+                visible: count > 1
                 textRole: "label"
                 valueRole: "value"
                 Accessible.name: i18n("Start-time UTC offset")
@@ -526,7 +526,7 @@ Controls.Dialog {
             PlasmaComponents.ComboBox {
                 id: workSessionEndOffset
                 Layout.fillWidth: true
-                visible: model.length > 1
+                visible: count > 1
                 textRole: "label"
                 valueRole: "value"
                 Accessible.name: i18n("End-time UTC offset")
@@ -555,7 +555,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: longSessionConfirmation
-        parent: root.parent
+        parent: root.contentItem
         modal: true
         property string durationText: ""
         title: i18n("Unusually long work session")
@@ -579,11 +579,10 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: statusEventEditor
-        parent: root.parent
+        parent: root.contentItem
         modal: true
         property var event: null
         title: i18n("Edit status event")
-        standardButtons: 0
         contentItem: ColumnLayout {
             width: Kirigami.Units.gridUnit * 28
             spacing: Kirigami.Units.smallSpacing
@@ -625,7 +624,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: deleteConfirmation
-        parent: root.parent
+        parent: root.contentItem
         modal: true
         title: i18n("Delete task?")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Yes
