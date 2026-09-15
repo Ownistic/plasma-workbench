@@ -324,8 +324,8 @@ Item {
 
     Controls.Dialog {
         id: createTaskDialog
-        modal: true
         parent: root
+        modal: true
         title: i18n("Create task")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
         width: Math.min(root.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 24)
@@ -384,8 +384,8 @@ Item {
 
     Controls.Dialog {
         id: createCategoryDialog
-        modal: true
         parent: root
+        modal: true
         title: i18n("Create category")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
         onOpened: {
@@ -406,8 +406,8 @@ Item {
 
     Controls.Dialog {
         id: categoryEditorDialog
-        property string categoryId: ""
         parent: root
+        property string categoryId: ""
         property string errorText: ""
         modal: true
         title: i18n("Edit category")
@@ -461,8 +461,8 @@ Item {
 
     Controls.Dialog {
         id: categoryDeleteDialog
-        property string categoryId: ""
         parent: root
+        property string categoryId: ""
         property string targetCategoryName: ""
         property string errorText: ""
         modal: true
@@ -508,8 +508,8 @@ Item {
 
     Controls.Dialog {
         id: moveTaskDialog
-        property var task: null
         parent: root
+        property var task: null
         modal: true
         title: i18n("Move task to category")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Ok
@@ -543,8 +543,8 @@ Item {
 
     Controls.Dialog {
         id: categoryTrashDialog
-        modal: true
         parent: root
+        modal: true
         title: i18n("Category trash")
         standardButtons: Controls.Dialog.Close
         property var trashedCategories: []
@@ -599,8 +599,8 @@ Item {
 
     Controls.Dialog {
         id: categoryManagementDialog
-        modal: true
         parent: root
+        modal: true
         title: i18n("Manage categories")
         standardButtons: Controls.Dialog.Close
         contentItem: Controls.ScrollView {
