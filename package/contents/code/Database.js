@@ -11,6 +11,7 @@ const STATUSES = ["backlog", "ready", "in_progress", "blocked", "completed"]
 let databaseName = DATABASE_ID
 let database
 let initialized = false
+let timezoneValidator = null
 
 function nowUtc() {
     return new Date().toISOString()
@@ -42,6 +43,25 @@ function normalizedText(value, fieldName, maximumLength) {
         fail(fieldName + " must contain between 1 and " + maximumLength + " characters.")
     }
     return normalized
+}
+
+function requireUtcInstant(value, fieldName) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+        fail(fieldName + " must be a UTC ISO-8601 timestamp.")
+    }
+    const timestamp = new Date(value)
+    if (isNaN(timestamp.getTime()) || timestamp.toISOString() !== value) {
+        fail(fieldName + " must be a valid UTC ISO-8601 timestamp.")
+    }
+    return value
+}
+
+function requireTimezoneId(value) {
+    const timezoneId = normalizedText(value, "Time zone", 100)
+    if (!timezoneValidator || !timezoneValidator(timezoneId)) {
+        fail("The time zone is invalid.")
+    }
+    return timezoneId
 }
 
 function requireStatus(status) {
@@ -98,13 +118,22 @@ function initialize() {
         return
     }
     open().transaction(function(tx) {
-        // LocalStorage exposes SQL only through transactions. Keep this explicit so
-        // supported SQLite runtimes enforce the schema foreign keys.
+        // Qt LocalStorage permits PRAGMA calls only inside transactions, where SQLite
+        // does not enable foreign keys. Migration triggers enforce the same references.
         tx.executeSql("PRAGMA foreign_keys = ON")
         Migrations.apply(tx, nowUtc())
         const active = tx.executeSql("SELECT COUNT(*) AS count FROM work_sessions WHERE ended_at_utc IS NULL")
         if (active.rows.item(0).count > 1) {
             fail("The database contains more than one active work session.")
+        }
+        const overlaps = tx.executeSql(
+            "SELECT 1 FROM work_sessions AS first_session JOIN work_sessions AS second_session " +
+            "ON first_session.id < second_session.id " +
+            "AND first_session.started_at_utc < COALESCE(second_session.ended_at_utc, '9999-12-31T23:59:59.999Z') " +
+            "AND COALESCE(first_session.ended_at_utc, '9999-12-31T23:59:59.999Z') > second_session.started_at_utc LIMIT 1"
+        )
+        if (overlaps.rows.length > 0) {
+            fail("The database contains overlapping work sessions.")
         }
     })
     initialized = true
@@ -117,6 +146,13 @@ function configureDatabaseForTests(name) {
     databaseName = name
     database = null
     initialized = false
+}
+
+function setTimeZoneValidator(validator) {
+    if (typeof validator !== "function") {
+        fail("A time-zone validator function is required.")
+    }
+    timezoneValidator = validator
 }
 
 function currentDatabaseName() {
@@ -139,6 +175,46 @@ function taskById(tx, taskId) {
     return task
 }
 
+function activeSession(tx) {
+    return first(tx.executeSql("SELECT * FROM work_sessions WHERE ended_at_utc IS NULL"))
+}
+
+function nextStatusSequence(tx, taskId) {
+    const result = tx.executeSql(
+        "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM status_events WHERE task_id = ?",
+        [taskId]
+    )
+    return result.rows.item(0).sequence
+}
+
+function assertSessionCanEnd(tx, session, endedAtUtc) {
+    requireUtcInstant(endedAtUtc, "End time")
+    if (endedAtUtc < session.started_at_utc) {
+        fail("The end time cannot be before the start time.")
+    }
+    if (hasSessionOverlap(tx, session.started_at_utc, endedAtUtc, session.id)) {
+        fail("The work session would overlap another session.")
+    }
+}
+
+function closeSession(tx, session, endedAtUtc) {
+    assertSessionCanEnd(tx, session, endedAtUtc)
+    tx.executeSql(
+        "UPDATE work_sessions SET ended_at_utc = ?, updated_at_utc = ? WHERE id = ?",
+        [endedAtUtc, endedAtUtc, session.id]
+    )
+    session.ended_at_utc = endedAtUtc
+    return session
+}
+
+function closeActiveSessionForTask(tx, taskId, endedAtUtc) {
+    const session = first(tx.executeSql(
+        "SELECT * FROM work_sessions WHERE task_id = ? AND ended_at_utc IS NULL",
+        [taskId]
+    ))
+    return session ? closeSession(tx, session, endedAtUtc) : null
+}
+
 function nextPosition(tx, tableName, whereClause, parameters) {
     const result = tx.executeSql(
         "SELECT COALESCE(MAX(position), 0) AS position FROM " + tableName + " " + whereClause,
@@ -148,19 +224,13 @@ function nextPosition(tx, tableName, whereClause, parameters) {
 }
 
 function rebalanceTasks(tx, categoryId, excludedTaskId) {
-    const parameters = [categoryId]
-    let exclusion = ""
-    if (excludedTaskId) {
-        exclusion = " AND id <> ?"
-        parameters.push(excludedTaskId)
-    }
     tx.executeSql(
-        "UPDATE tasks SET position = position + ? WHERE category_id = ?" + exclusion,
-        [POSITION_OFFSET].concat(parameters)
+        "UPDATE tasks SET position = position + ? WHERE category_id = ?",
+        [POSITION_OFFSET, categoryId]
     )
     const ordered = rows(tx.executeSql(
-        "SELECT id FROM tasks WHERE category_id = ?" + exclusion + " ORDER BY position, created_at_utc, id",
-        parameters
+        "SELECT id FROM tasks WHERE category_id = ? ORDER BY position, created_at_utc, id",
+        [categoryId]
     ))
     for (let index = 0; index < ordered.length; index += 1) {
         tx.executeSql("UPDATE tasks SET position = ? WHERE id = ?", [(index + 1) * POSITION_GAP, ordered[index].id])
@@ -190,7 +260,7 @@ function positionForMove(tx, categoryId, taskId, targetTaskId, placement) {
     let next = insertionIndex < ordered.length ? ordered[insertionIndex].position : null
     if ((previous !== null && next !== null && next - previous < 2)
         || (previous === null && next !== null && next < 2)) {
-        rebalanceTasks(tx, categoryId, taskId)
+        rebalanceTasks(tx, categoryId)
         return positionForMove(tx, categoryId, taskId, targetTaskId, placement)
     }
     if (previous === null && next === null) {
@@ -208,7 +278,7 @@ function positionForMove(tx, categoryId, taskId, targetTaskId, placement) {
 function reconcileStatusHistory(tx, taskId) {
     const events = rows(tx.executeSql(
         "SELECT id, status, occurred_at_utc FROM status_events WHERE task_id = ? " +
-        "ORDER BY occurred_at_utc, created_at_utc, id",
+        "ORDER BY occurred_at_utc, sequence, id",
         [taskId]
     ))
     if (events.length === 0) {
@@ -219,10 +289,12 @@ function reconcileStatusHistory(tx, taskId) {
         tx.executeSql("UPDATE status_events SET previous_status = ? WHERE id = ?", [previousStatus, events[index].id])
         previousStatus = events[index].status
     }
+    const current = events[events.length - 1]
     tx.executeSql(
         "UPDATE tasks SET status = ?, completed_at_utc = ?, updated_at_utc = ? WHERE id = ?",
-        [previousStatus, previousStatus === "completed" ? events[events.length - 1].occurred_at_utc : null, nowUtc(), taskId]
+        [previousStatus, previousStatus === "completed" ? current.occurred_at_utc : null, nowUtc(), taskId]
     )
+    return { status: previousStatus, occurredAtUtc: current.occurred_at_utc }
 }
 
 function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
@@ -246,8 +318,7 @@ function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
         || (previous === null && next !== null && next < 2)) {
         tx.executeSql("UPDATE categories SET position = position + ?", [POSITION_OFFSET])
         const categories = rows(tx.executeSql(
-            "SELECT id FROM categories WHERE id <> ? ORDER BY position, created_at_utc, id",
-            [categoryId]
+            "SELECT id FROM categories ORDER BY position, created_at_utc, id"
         ))
         for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex += 1) {
             tx.executeSql("UPDATE categories SET position = ? WHERE id = ?", [(categoryIndex + 1) * POSITION_GAP, categories[categoryIndex].id])
@@ -413,8 +484,8 @@ function createTask(input) {
              task.completedAtUtc, task.createdAtUtc, task.updatedAtUtc]
         )
         tx.executeSql(
-            "INSERT INTO status_events (id, task_id, previous_status, status, occurred_at_utc, manually_edited, created_at_utc, updated_at_utc) " +
-            "VALUES (?, ?, NULL, ?, ?, 0, ?, ?)",
+            "INSERT INTO status_events (id, task_id, previous_status, status, occurred_at_utc, sequence, manually_edited, created_at_utc, updated_at_utc) " +
+            "VALUES (?, ?, NULL, ?, ?, 1, 0, ?, ?)",
             [newId(), task.id, status, timestamp, timestamp, timestamp]
         )
         return task
@@ -433,6 +504,43 @@ function updateTask(input) {
         }
         tx.executeSql("UPDATE tasks SET title = ?, details = ?, updated_at_utc = ? WHERE id = ?", [title, details, nowUtc(), taskId])
         return { id: taskId, title: title, details: details }
+    })
+}
+
+function saveTask(input) {
+    input = input || {}
+    const taskId = requireId(input.id, "Task ID")
+    const title = normalizedText(input.title, "Task title", 200)
+    const details = typeof input.details === "string" ? input.details : ""
+    const categoryId = requireId(input.categoryId, "Category ID")
+    const status = requireStatus(input.status)
+    if (details.length > 20000) {
+        fail("Task details must contain no more than 20,000 characters.")
+    }
+    return write(function(tx) {
+        const task = taskById(tx, taskId)
+        categoryById(tx, categoryId)
+        const timestamp = nowUtc()
+        let position = task.position
+        if (task.category_id !== categoryId) {
+            position = positionForMove(tx, categoryId, taskId, null, "before")
+        }
+        tx.executeSql(
+            "UPDATE tasks SET title = ?, details = ?, category_id = ?, position = ?, updated_at_utc = ? WHERE id = ?",
+            [title, details, categoryId, position, timestamp, taskId]
+        )
+        if (task.status !== status) {
+            tx.executeSql(
+                "INSERT INTO status_events (id, task_id, previous_status, status, occurred_at_utc, sequence, manually_edited, created_at_utc, updated_at_utc) " +
+                "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+                [newId(), taskId, task.status, status, timestamp, nextStatusSequence(tx, taskId), timestamp, timestamp]
+            )
+            const current = reconcileStatusHistory(tx, taskId)
+            if (current.status === "completed") {
+                closeActiveSessionForTask(tx, taskId, timestamp)
+            }
+        }
+        return { id: taskId }
     })
 }
 
@@ -462,7 +570,7 @@ function archiveTask(taskId) {
     return write(function(tx) {
         taskById(tx, taskId)
         const timestamp = nowUtc()
-        tx.executeSql("UPDATE work_sessions SET ended_at_utc = ?, updated_at_utc = ? WHERE task_id = ? AND ended_at_utc IS NULL", [timestamp, timestamp, taskId])
+        closeActiveSessionForTask(tx, taskId, timestamp)
         tx.executeSql("UPDATE tasks SET archived_at_utc = ?, updated_at_utc = ? WHERE id = ?", [timestamp, timestamp, taskId])
     })
 }
@@ -477,28 +585,28 @@ function deleteTask(taskId) {
     })
 }
 
-function changeStatus(taskId, status, occurredAtUtc) {
+function changeStatus(taskId, status) {
+    if (arguments.length > 2) {
+        fail("Use status-history correction to change a historical status timestamp.")
+    }
     taskId = requireId(taskId, "Task ID")
     status = requireStatus(status)
-    const timestamp = occurredAtUtc || nowUtc()
     return write(function(tx) {
         const task = taskById(tx, taskId)
         if (task.status === status) {
             return null
         }
-        if (status === "completed") {
-            tx.executeSql("UPDATE work_sessions SET ended_at_utc = ?, updated_at_utc = ? WHERE task_id = ? AND ended_at_utc IS NULL", [timestamp, timestamp, taskId])
-        }
-        tx.executeSql(
-            "UPDATE tasks SET status = ?, completed_at_utc = ?, updated_at_utc = ? WHERE id = ?",
-            [status, status === "completed" ? timestamp : null, timestamp, taskId]
-        )
+        const timestamp = nowUtc()
         const eventId = newId()
         tx.executeSql(
-            "INSERT INTO status_events (id, task_id, previous_status, status, occurred_at_utc, manually_edited, created_at_utc, updated_at_utc) " +
-            "VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
-            [eventId, taskId, task.status, status, timestamp, timestamp, timestamp]
+            "INSERT INTO status_events (id, task_id, previous_status, status, occurred_at_utc, sequence, manually_edited, created_at_utc, updated_at_utc) " +
+            "VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            [eventId, taskId, task.status, status, timestamp, nextStatusSequence(tx, taskId), timestamp, timestamp]
         )
+        const current = reconcileStatusHistory(tx, taskId)
+        if (current.status === "completed") {
+            closeActiveSessionForTask(tx, taskId, timestamp)
+        }
         return eventId
     })
 }
@@ -514,16 +622,19 @@ function getActiveSession() {
 
 function startTimer(taskId, timezoneId, startedAtUtc) {
     taskId = requireId(taskId, "Task ID")
-    timezoneId = normalizedText(timezoneId, "Time zone", 100)
-    const timestamp = startedAtUtc || nowUtc()
+    timezoneId = requireTimezoneId(timezoneId)
+    const timestamp = requireUtcInstant(startedAtUtc || nowUtc(), "Start time")
     return write(function(tx) {
         taskById(tx, taskId)
-        const active = first(tx.executeSql("SELECT * FROM work_sessions WHERE ended_at_utc IS NULL"))
+        const active = activeSession(tx)
         if (active && active.task_id === taskId) {
             return active
         }
         if (active) {
-            tx.executeSql("UPDATE work_sessions SET ended_at_utc = ?, updated_at_utc = ? WHERE id = ?", [timestamp, timestamp, active.id])
+            closeSession(tx, active, timestamp)
+        }
+        if (hasSessionOverlap(tx, timestamp, "9999-12-31T23:59:59.999Z", null)) {
+            fail("The active timer would overlap another session.")
         }
         const session = {
             id: newId(), taskId: taskId, startedAtUtc: timestamp, endedAtUtc: null,
@@ -539,15 +650,13 @@ function startTimer(taskId, timezoneId, startedAtUtc) {
 }
 
 function stopTimer(taskId, stoppedAtUtc) {
-    const timestamp = stoppedAtUtc || nowUtc()
+    const timestamp = requireUtcInstant(stoppedAtUtc || nowUtc(), "End time")
     return write(function(tx) {
-        const active = first(tx.executeSql("SELECT * FROM work_sessions WHERE ended_at_utc IS NULL"))
+        const active = activeSession(tx)
         if (!active || (taskId && active.task_id !== taskId)) {
             return null
         }
-        tx.executeSql("UPDATE work_sessions SET ended_at_utc = ?, updated_at_utc = ? WHERE id = ?", [timestamp, timestamp, active.id])
-        active.ended_at_utc = timestamp
-        return active
+        return closeSession(tx, active, timestamp)
     })
 }
 
@@ -573,9 +682,9 @@ function hasSessionOverlap(tx, startedAtUtc, endedAtUtc, excludedSessionId) {
 function createWorkSession(input) {
     input = input || {}
     const taskId = requireId(input.taskId, "Task ID")
-    const startedAtUtc = requireId(input.startedAtUtc, "Start time")
-    const endedAtUtc = requireId(input.endedAtUtc, "End time")
-    const timezoneId = normalizedText(input.timezoneId, "Time zone", 100)
+    const startedAtUtc = requireUtcInstant(input.startedAtUtc, "Start time")
+    const endedAtUtc = requireUtcInstant(input.endedAtUtc, "End time")
+    const timezoneId = requireTimezoneId(input.timezoneId)
     if (endedAtUtc < startedAtUtc) {
         fail("The end time cannot be before the start time.")
     }
@@ -604,12 +713,12 @@ function updateWorkSession(input) {
         if (!session) {
             fail("The work session does not exist.")
         }
-        const startedAtUtc = input.startedAtUtc === undefined ? session.started_at_utc : requireId(input.startedAtUtc, "Start time")
-        const endedAtUtc = input.endedAtUtc === undefined ? session.ended_at_utc : requireId(input.endedAtUtc, "End time")
+        const startedAtUtc = input.startedAtUtc === undefined ? session.started_at_utc : requireUtcInstant(input.startedAtUtc, "Start time")
+        const endedAtUtc = input.endedAtUtc === undefined ? session.ended_at_utc : requireUtcInstant(input.endedAtUtc, "End time")
         if (!endedAtUtc || endedAtUtc < startedAtUtc) {
             fail("Manual work sessions must have an end time after their start time.")
         }
-        const timezoneId = input.timezoneId === undefined ? session.timezone_id : normalizedText(input.timezoneId, "Time zone", 100)
+        const timezoneId = input.timezoneId === undefined ? session.timezone_id : requireTimezoneId(input.timezoneId)
         const note = input.note === undefined ? session.note : input.note
         if (typeof note !== "string" || note.length > 20000) {
             fail("Work-session notes must contain no more than 20,000 characters.")
@@ -632,9 +741,9 @@ function deleteWorkSession(sessionId) {
 }
 
 function listReportSessions(periodStartUtc, periodEndUtc, currentUtc) {
-    requireId(periodStartUtc, "Report start")
-    requireId(periodEndUtc, "Report end")
-    const activeEndUtc = currentUtc || nowUtc()
+    periodStartUtc = requireUtcInstant(periodStartUtc, "Report start")
+    periodEndUtc = requireUtcInstant(periodEndUtc, "Report end")
+    const activeEndUtc = requireUtcInstant(currentUtc || nowUtc(), "Report end")
     return read(function(tx) {
         return rows(tx.executeSql(
             "SELECT work_sessions.id AS sessionId, work_sessions.task_id AS taskId, tasks.title AS taskTitle, " +
@@ -654,7 +763,7 @@ function listReportSessions(periodStartUtc, periodEndUtc, currentUtc) {
 
 function listStatusEventsInTransaction(tx, taskId) {
     return rows(tx.executeSql(
-        "SELECT * FROM status_events WHERE task_id = ? ORDER BY occurred_at_utc DESC, created_at_utc DESC, id DESC",
+        "SELECT * FROM status_events WHERE task_id = ? ORDER BY occurred_at_utc DESC, sequence DESC, id DESC",
         [taskId]
     ))
 }
@@ -668,7 +777,7 @@ function updateStatusEvent(input) {
     input = input || {}
     const eventId = requireId(input.id, "Status event ID")
     const status = requireStatus(input.status)
-    const occurredAtUtc = requireId(input.occurredAtUtc, "Status event time")
+    const occurredAtUtc = requireUtcInstant(input.occurredAtUtc, "Status event time")
     return write(function(tx) {
         const event = first(tx.executeSql("SELECT * FROM status_events WHERE id = ?", [eventId]))
         if (!event) {
@@ -678,7 +787,10 @@ function updateStatusEvent(input) {
             "UPDATE status_events SET status = ?, occurred_at_utc = ?, manually_edited = 1, updated_at_utc = ? WHERE id = ?",
             [status, occurredAtUtc, nowUtc(), eventId]
         )
-        reconcileStatusHistory(tx, event.task_id)
+        const current = reconcileStatusHistory(tx, event.task_id)
+        if (current.status === "completed") {
+            closeActiveSessionForTask(tx, event.task_id, nowUtc())
+        }
     })
 }
 
@@ -694,6 +806,9 @@ function deleteStatusEvent(eventId) {
             fail("A task must retain its initial status event.")
         }
         tx.executeSql("DELETE FROM status_events WHERE id = ?", [eventId])
-        reconcileStatusHistory(tx, event.task_id)
+        const current = reconcileStatusHistory(tx, event.task_id)
+        if (current.status === "completed") {
+            closeActiveSessionForTask(tx, event.task_id, nowUtc())
+        }
     })
 }

@@ -14,12 +14,14 @@ QVariantMap invalidResult(const QString &error)
     return {{QStringLiteral("valid"), false}, {QStringLiteral("error"), error}};
 }
 
-QVariantMap rangeResult(const QDateTime &start, const QDateTime &end)
+QVariantMap rangeResult(const QDateTime &start, const QDateTime &end, const QTimeZone &timeZone)
 {
     return {
         {QStringLiteral("valid"), true},
         {QStringLiteral("startUtc"), start.toUTC().toString(Qt::ISODateWithMs)},
         {QStringLiteral("endUtc"), end.toUTC().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("startDate"), start.toTimeZone(timeZone).date().toString(Qt::ISODate)},
+        {QStringLiteral("endDateExclusive"), end.toTimeZone(timeZone).date().toString(Qt::ISODate)},
     };
 }
 
@@ -105,7 +107,7 @@ QVariantMap TimeMath::weekRange(int year, int month, int day, const QString &tim
     if (!start.isValid() || !end.isValid() || start >= end) {
         return invalidResult(QStringLiteral("The local week does not map to a valid UTC range."));
     }
-    return rangeResult(start, end);
+    return rangeResult(start, end, timeZone);
 }
 
 QVariantMap TimeMath::monthRange(int year, int month, const QString &timeZoneId) const
@@ -125,7 +127,7 @@ QVariantMap TimeMath::monthRange(int year, int month, const QString &timeZoneId)
     if (!start.isValid() || !end.isValid() || start >= end) {
         return invalidResult(QStringLiteral("The local month does not map to a valid UTC range."));
     }
-    return rangeResult(start, end);
+    return rangeResult(start, end, timeZone);
 }
 
 QVariantList TimeMath::splitInterval(const QString &startUtc, const QString &endUtc,

@@ -19,11 +19,13 @@ Use Qt 6 tooling explicitly on this system:
 /usr/lib/qt6/bin/qmltestrunner -import build/qml -input tests/qml
 ```
 
-Install both the QML plugin and plasmoid to the chosen prefix:
+Build the self-contained plasmoid, then install its package with `kpackagetool6`:
 
 ```sh
-cmake --install build --prefix "$HOME/.local"
+kpackagetool6 --type Plasma/Applet --install package
 ```
+
+The native timezone module is placed in `package/contents/ui/time/` during the build and is included with the installed plasmoid.
 
 Install `plasma-sdk` before visual testing with `plasmoidviewer`.
 

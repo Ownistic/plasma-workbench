@@ -11,7 +11,11 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS Core Qml Test)
 qt_standard_project_setup()
 qt_policy(SET QTP0001 NEW)
 
-set(WORKTODO_QML_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/qt6/qml")
+# The compiled module is bundled with the plasmoid so kpackagetool can install
+# one self-contained package. CMake writes its runtime artifacts here on build.
+set(WORKTODO_QML_BUNDLE_DIR "${CMAKE_SOURCE_DIR}/package/contents/ui/time")
+set(WORKTODO_QML_BUILD_DIR "${CMAKE_BINARY_DIR}/qml/io/github/ownisticapps/worktodo/time")
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${WORKTODO_QML_BUNDLE_DIR}")
 
 add_subdirectory(src/time)
 

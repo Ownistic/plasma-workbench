@@ -1,6 +1,6 @@
 .pragma library
 
-const CURRENT_VERSION = 1
+const CURRENT_VERSION = 2
 
 const migrations = [
     {
@@ -40,13 +40,55 @@ const migrations = [
                 "CHECK (status IN ('backlog', 'ready', 'in_progress', 'blocked', 'completed')))",
             "CREATE INDEX IF NOT EXISTS status_events_task_time_idx ON status_events(task_id, occurred_at_utc)"
         ]
+    },
+    {
+        version: 2,
+        statements: [
+            "ALTER TABLE status_events ADD COLUMN sequence INTEGER NOT NULL DEFAULT 0",
+            "UPDATE status_events SET sequence = rowid WHERE sequence = 0",
+            "CREATE UNIQUE INDEX IF NOT EXISTS status_events_task_sequence_idx ON status_events(task_id, sequence)",
+            "CREATE TRIGGER IF NOT EXISTS tasks_category_exists_insert " +
+                "BEFORE INSERT ON tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM categories WHERE id = NEW.category_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Task category does not exist'); END",
+            "CREATE TRIGGER IF NOT EXISTS tasks_category_exists_update " +
+                "BEFORE UPDATE OF category_id ON tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM categories WHERE id = NEW.category_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Task category does not exist'); END",
+            "CREATE TRIGGER IF NOT EXISTS sessions_task_exists_insert " +
+                "BEFORE INSERT ON work_sessions FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Work-session task does not exist'); END",
+            "CREATE TRIGGER IF NOT EXISTS sessions_task_exists_update " +
+                "BEFORE UPDATE OF task_id ON work_sessions FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Work-session task does not exist'); END",
+            "CREATE TRIGGER IF NOT EXISTS events_task_exists_insert " +
+                "BEFORE INSERT ON status_events FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Status-event task does not exist'); END",
+            "CREATE TRIGGER IF NOT EXISTS events_task_exists_update " +
+                "BEFORE UPDATE OF task_id ON status_events FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Status-event task does not exist'); END"
+        ]
     }
 ]
 
 function apply(tx, appliedAtUtc) {
     tx.executeSql("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
-    const result = tx.executeSql("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations")
-    const currentVersion = result.rows.item(0).version
+    const applied = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
+    let currentVersion = 0
+    for (let index = 0; index < applied.rows.length; index += 1) {
+        const version = applied.rows.item(index).version
+        if (version !== index + 1) {
+            throw new Error("The database migration history is not contiguous.")
+        }
+        currentVersion = version
+    }
+    if (currentVersion > CURRENT_VERSION) {
+        throw new Error("The database was created by a newer version of Work Todo.")
+    }
 
     for (let index = 0; index < migrations.length; index += 1) {
         const migration = migrations[index]

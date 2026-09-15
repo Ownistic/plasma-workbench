@@ -4,7 +4,8 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
-import io.github.ownisticapps.worktodo.time as WorkTodoTime
+import org.kde.quickcharts as Charts
+import "time" as WorkTodoTime
 
 import "../code/Reports.js" as Reports
 
@@ -17,6 +18,8 @@ Controls.Dialog {
     property int month: 0
     property int day: 0
     property var report: null
+    readonly property var chartBuckets: !root.report ? [] : (root.monthly
+        && root.width < Kirigami.Units.gridUnit * 26 ? root.report.byWeek : root.report.byDate)
     modal: true
     title: root.monthly ? i18n("Monthly report") : i18n("Weekly report")
     standardButtons: Controls.Dialog.Close
@@ -46,6 +49,7 @@ Controls.Dialog {
             root.report = Reports.monthlyReport(WorkTodoTime.TimeMath, {
                 year: root.year,
                 month: root.month,
+                firstDayOfWeek: root.board.firstDayOfWeek,
                 timezoneId: root.board.reportTimezone
             })
         } else {
@@ -69,12 +73,45 @@ Controls.Dialog {
     function movePeriod(direction) {
         const date = root.calendarDate()
         if (root.monthly) {
+            date.setUTCDate(1)
             date.setUTCMonth(date.getUTCMonth() + direction)
+            date.setUTCDate(Math.min(root.day, new Date(Date.UTC(
+                date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()))
         } else {
             date.setUTCDate(date.getUTCDate() + (direction * 7))
         }
         root.setCalendarDate(date)
         root.refresh()
+    }
+
+    function openTaskBreakdown(date) {
+        let tasks = []
+        if (root.monthly && root.width < Kirigami.Units.gridUnit * 26) {
+            const weekEnd = new Date(date + "T00:00:00.000Z")
+            weekEnd.setUTCDate(weekEnd.getUTCDate() + 7)
+            const totals = {}
+            for (let index = 0; index < root.report.dailyByTask.length; index += 1) {
+                const entry = root.report.dailyByTask[index]
+                if (entry.date < date || entry.date >= weekEnd.toISOString().slice(0, 10)) {
+                    continue
+                }
+                for (let taskIndex = 0; taskIndex < entry.tasks.length; taskIndex += 1) {
+                    const task = entry.tasks[taskIndex]
+                    if (!totals[task.id]) {
+                        totals[task.id] = { id: task.id, label: task.label, seconds: 0 }
+                    }
+                    totals[task.id].seconds += task.seconds
+                }
+            }
+            tasks = Object.keys(totals).map(function(id) { return totals[id] })
+                .sort(function(left, right) { return right.seconds - left.seconds })
+        } else {
+            const matches = root.report.dailyByTask.filter(function(entry) { return entry.date === date })
+            tasks = matches.length > 0 ? matches[0].tasks : []
+        }
+        breakdownDate.text = date
+        breakdownTasks.model = tasks
+        breakdownDialog.open()
     }
 
     contentItem: ColumnLayout {
@@ -127,6 +164,31 @@ Controls.Dialog {
             text: root.report ? i18n("Total: %1", root.board.formatSeconds(root.report.totalSeconds)) : ""
         }
 
+        Charts.BarChart {
+            id: summaryChart
+            Layout.fillWidth: true
+            Layout.preferredHeight: Kirigami.Units.gridUnit * 8
+            visible: root.report && root.report.totalSeconds > 0
+            orientation: Charts.BarChart.VerticalOrientation
+            spacing: Kirigami.Units.smallSpacing
+            backgroundColor: Kirigami.Theme.alternateBackgroundColor
+
+            Charts.ArraySource {
+                id: reportValues
+                array: root.chartBuckets.map(function(bucket) { return bucket.seconds })
+            }
+
+            nameSource: Charts.ArraySource {
+                array: root.chartBuckets.map(function(bucket) { return bucket.label })
+            }
+
+            colorSource: Charts.ArraySource {
+                array: root.chartBuckets.map(function() { return Kirigami.Theme.highlightColor })
+            }
+
+            Component.onCompleted: summaryChart.insertValueSource(0, reportValues)
+        }
+
         PlasmaExtras.PlaceholderMessage {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -145,7 +207,7 @@ Controls.Dialog {
                 spacing: Kirigami.Units.largeSpacing
 
                 Repeater {
-                    model: root.report ? root.report.byDate : []
+                    model: root.chartBuckets
 
                     delegate: RowLayout {
                         required property var modelData
@@ -172,6 +234,10 @@ Controls.Dialog {
 
                         PlasmaComponents.Label {
                             text: root.board.formatSeconds(modelData.seconds)
+                        }
+
+                        TapHandler {
+                            onTapped: root.openTaskBreakdown(modelData.id)
                         }
                     }
                 }
@@ -206,6 +272,33 @@ Controls.Dialog {
                         Layout.fillWidth: true
                         text: modelData.label + ": " + root.board.formatSeconds(modelData.seconds)
                     }
+                }
+            }
+        }
+    }
+
+    Controls.Dialog {
+        id: breakdownDialog
+        parent: root.parent
+        modal: true
+        title: i18n("Task breakdown")
+        standardButtons: Controls.Dialog.Close
+        contentItem: ColumnLayout {
+            width: Kirigami.Units.gridUnit * 24
+
+            PlasmaComponents.Label {
+                id: breakdownDate
+                Layout.fillWidth: true
+                font.bold: true
+            }
+
+            Repeater {
+                id: breakdownTasks
+                delegate: PlasmaComponents.Label {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    text: modelData.label + ": " + root.board.formatSeconds(modelData.seconds)
+                    wrapMode: Text.Wrap
                 }
             }
         }

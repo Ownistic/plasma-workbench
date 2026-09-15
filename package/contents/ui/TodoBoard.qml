@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
-import io.github.ownisticapps.worktodo.time as WorkTodoTime
+import "time" as WorkTodoTime
 
 import "../code/Database.js" as Database
 
@@ -12,14 +12,12 @@ Item {
     id: root
 
     required property var plasmoidConfiguration
+    required property var plasmoidRoot
     property var selectedStatuses: []
-    property var activeSession: null
-    property int elapsedRefresh: 0
-    readonly property bool hasActiveSession: root.activeSession !== null
-    readonly property string activeElapsedText: root.hasActiveSession
-        ? root.formatSeconds(root.elapsedSeconds(root.activeSession.started_at_utc)) : ""
-    readonly property string activeTaskSummary: root.hasActiveSession
-        ? i18n("Tracking %1", root.activeElapsedText) : i18n("No active timer")
+    readonly property var activeSession: root.plasmoidRoot.activeSession
+    readonly property bool hasActiveSession: root.plasmoidRoot.hasActiveSession
+    readonly property string activeElapsedText: root.plasmoidRoot.activeElapsedText
+    readonly property string activeTaskSummary: root.plasmoidRoot.activeTaskSummary
     readonly property string reportTimezone: WorkTodoTime.TimeMath.isValidTimeZone(root.plasmoidConfiguration.reportTimezone)
         ? root.plasmoidConfiguration.reportTimezone : WorkTodoTime.TimeMath.systemTimeZoneId()
     readonly property int firstDayOfWeek: root.plasmoidConfiguration.firstDayOfWeek >= 1
@@ -29,35 +27,14 @@ Item {
     ListModel { id: categoryModel }
 
     function formatSeconds(seconds) {
-        const safeSeconds = Math.max(0, Math.floor(seconds))
-        const hours = Math.floor(safeSeconds / 3600)
-        const minutes = Math.floor((safeSeconds % 3600) / 60)
-        const remainingSeconds = safeSeconds % 60
-        return (hours < 10 ? "0" : "") + hours + ":"
-            + (minutes < 10 ? "0" : "") + minutes + ":"
-            + (remainingSeconds < 10 ? "0" : "") + remainingSeconds
-    }
-
-    function elapsedSeconds(startedAtUtc) {
-        if (!startedAtUtc) {
-            return 0
-        }
-        return (Date.now() - Date.parse(startedAtUtc)) / 1000
+        return root.plasmoidRoot.formatSeconds(seconds)
     }
 
     function taskElapsedText(task) {
         const total = Number(task.trackedSeconds || 0)
-        return root.formatSeconds(total + (task.activeStartedAt ? root.elapsedSeconds(task.activeStartedAt) : 0))
-    }
-
-    function categoryForId(categoryId) {
-        for (let index = 0; index < taskModel.count; index += 1) {
-            const task = taskModel.get(index)
-            if (task.categoryId === categoryId) {
-                return task
-            }
-        }
-        return { categoryName: "", categoryColor: Kirigami.Theme.disabledTextColor }
+        root.plasmoidRoot.elapsedRefresh
+        return root.plasmoidRoot.formatSeconds(total + (task.activeStartedAt
+            ? root.plasmoidRoot.elapsedSeconds(task.activeStartedAt) : 0))
     }
 
     function reload() {
@@ -74,7 +51,7 @@ Item {
         for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
             taskModel.append(tasks[taskIndex])
         }
-        root.activeSession = Database.getActiveSession()
+        root.plasmoidRoot.activeSession = Database.getActiveSession()
     }
 
     function toggleStatus(status) {
@@ -90,7 +67,7 @@ Item {
     }
 
     function toggleTimer(task) {
-        if (root.activeSession && root.activeSession.task_id === task.taskId) {
+        if (root.plasmoidRoot.activeSession && root.plasmoidRoot.activeSession.task_id === task.taskId) {
             Database.stopTimer(task.taskId)
         } else {
             Database.startTimer(task.taskId, root.reportTimezone)
@@ -98,20 +75,60 @@ Item {
         root.reload()
     }
 
+    function adjacentTask(task, direction) {
+        if (taskModel.count === 0) {
+            return null
+        }
+        let currentIndex = -1
+        for (let index = 0; index < taskModel.count; index += 1) {
+            const candidate = taskModel.get(index)
+            if (candidate.categoryId === task.categoryId && candidate.taskId === task.taskId) {
+                currentIndex = index
+                break
+            }
+        }
+        for (let index = currentIndex + direction; index >= 0 && index < taskModel.count; index += direction) {
+            const candidate = taskModel.get(index)
+            if (candidate.categoryId === task.categoryId) {
+                return candidate
+            }
+        }
+        return null
+    }
+
+    function moveTask(task, targetTask, placement) {
+        if (!targetTask) {
+            return
+        }
+        Database.moveTask({
+            taskId: task.taskId,
+            targetCategoryId: targetTask.categoryId,
+            targetTaskId: targetTask.taskId,
+            placement: placement
+        })
+        root.reload()
+    }
+
+    function moveTaskById(taskId, targetTaskId, targetCategoryId, placement) {
+        Database.moveTask({
+            taskId: taskId,
+            targetCategoryId: targetCategoryId,
+            targetTaskId: targetTaskId || null,
+            placement: placement || "before"
+        })
+        root.reload()
+    }
+
     Component.onCompleted: {
+        Database.setTimeZoneValidator(function(timezoneId) {
+            return WorkTodoTime.TimeMath.isValidTimeZone(timezoneId)
+        })
         Database.initialize()
         const configuredStatuses = root.plasmoidConfiguration.defaultStatusFilter.split(",")
         root.selectedStatuses = configuredStatuses.filter(function(status) {
             return ["backlog", "ready", "in_progress", "blocked", "completed"].indexOf(status) !== -1
         })
         root.reload()
-    }
-
-    Timer {
-        interval: 1000
-        repeat: true
-        running: root.hasActiveSession
-        onTriggered: root.elapsedRefresh += 1
     }
 
     ColumnLayout {
@@ -182,37 +199,93 @@ Item {
         PlasmaExtras.PlaceholderMessage {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: taskModel.count === 0
-            text: i18n("No tasks match these filters")
+            visible: categoryModel.count === 0
+            text: i18n("No categories yet")
             helpfulAction: Controls.Action {
-                text: i18n("Create task")
-                onTriggered: createTaskDialog.open()
+                text: i18n("Create category")
+                onTriggered: createCategoryDialog.open()
             }
         }
 
-        ListView {
+        Flickable {
             id: taskList
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: taskModel.count > 0
+            visible: categoryModel.count > 0
             clip: true
-            spacing: Kirigami.Units.smallSpacing
-            model: taskModel
-            section.property: "categoryId"
-            section.delegate: CategoryHeader {
-                readonly property var category: root.categoryForId(section)
-                categoryName: category.categoryName
-                categoryColor: category.categoryColor
+            contentWidth: width
+            contentHeight: categoryColumn.implicitHeight
+
+            Column {
+                id: categoryColumn
                 width: taskList.width
-            }
-            delegate: TaskCard {
-                required property var model
-                width: taskList.width
-                task: model
-                active: root.activeSession && root.activeSession.task_id === model.taskId
-                elapsedText: root.taskElapsedText(model)
-                onTimerRequested: root.toggleTimer(model)
-                onOpenRequested: detailsDialog.openForTask(model.taskId)
+                spacing: Kirigami.Units.largeSpacing
+
+                PlasmaExtras.PlaceholderMessage {
+                    width: parent.width
+                    visible: taskModel.count === 0
+                    text: i18n("No tasks match these filters")
+                }
+
+                Repeater {
+                    model: categoryModel
+
+                    delegate: Column {
+                        required property var model
+                        readonly property string currentCategoryId: model.id
+                        width: categoryColumn.width
+                        spacing: Kirigami.Units.smallSpacing
+
+                        CategoryHeader {
+                            width: parent.width
+                            categoryId: model.id
+                            categoryName: model.name
+                            categoryColor: model.color
+                            collapsed: model.collapsed !== 0
+                            onCollapseRequested: {
+                                Database.updateCategory({ id: model.id, collapsed: model.collapsed === 0 })
+                                root.reload()
+                            }
+                            onEditRequested: categoryEditorDialog.openForCategory(model)
+                            onDeleteRequested: categoryDeleteDialog.openForCategory(model)
+                            onTaskDropped: function(taskId) {
+                                root.moveTaskById(taskId, null, model.id, "before")
+                            }
+                            onCategoryDropped: function(categoryId) {
+                                Database.moveCategory({
+                                    categoryId: categoryId,
+                                    targetCategoryId: model.id,
+                                    placement: "before"
+                                })
+                                root.reload()
+                            }
+                        }
+
+                        Repeater {
+                            model: taskModel
+
+                            delegate: TaskCard {
+                                required property var model
+                                width: parent.width
+                                visible: model.categoryId === currentCategoryId && model.categoryCollapsed === 0
+                                height: visible ? implicitHeight : 0
+                                task: model
+                                active: root.activeSession && root.activeSession.task_id === model.taskId
+                                elapsedText: root.taskElapsedText(model)
+                                canMoveUp: root.adjacentTask(model, -1) !== null
+                                canMoveDown: root.adjacentTask(model, 1) !== null
+                                onTimerRequested: root.toggleTimer(model)
+                                onOpenRequested: detailsDialog.openForTask(model.taskId)
+                                onMoveUpRequested: root.moveTask(model, root.adjacentTask(model, -1), "before")
+                                onMoveDownRequested: root.moveTask(model, root.adjacentTask(model, 1), "after")
+                                onMoveToCategoryRequested: moveTaskDialog.openForTask(model)
+                                onDropRequested: function(sourceTaskId) {
+                                    root.moveTaskById(sourceTaskId, model.taskId, model.categoryId, "before")
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -294,6 +367,140 @@ Item {
             id: categoryName
             implicitWidth: Kirigami.Units.gridUnit * 20
             placeholderText: i18n("Category name")
+        }
+    }
+
+    Controls.Dialog {
+        id: categoryEditorDialog
+        property string categoryId: ""
+        property string errorText: ""
+        modal: true
+        title: i18n("Edit category")
+        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
+
+        function openForCategory(category) {
+            categoryId = category.id
+            categoryEditorName.text = category.name
+            categoryEditorColor.text = category.color
+            errorText = ""
+            open()
+            categoryEditorName.forceActiveFocus()
+        }
+
+        onAccepted: {
+            try {
+                Database.updateCategory({ id: categoryId, name: categoryEditorName.text, color: categoryEditorColor.text })
+                root.reload()
+            } catch (error) {
+                errorText = error.message
+            }
+        }
+
+        contentItem: ColumnLayout {
+            implicitWidth: Kirigami.Units.gridUnit * 20
+
+            PlasmaComponents.TextField {
+                id: categoryEditorName
+                Layout.fillWidth: true
+                placeholderText: i18n("Category name")
+                Accessible.name: i18n("Category name")
+            }
+
+            PlasmaComponents.TextField {
+                id: categoryEditorColor
+                Layout.fillWidth: true
+                placeholderText: i18n("Color, for example #3daee9")
+                Accessible.name: i18n("Category color")
+            }
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                visible: categoryEditorDialog.errorText.length > 0
+                text: categoryEditorDialog.errorText
+                color: Kirigami.Theme.negativeTextColor
+                wrapMode: Text.Wrap
+                Accessible.name: categoryEditorDialog.errorText
+            }
+        }
+    }
+
+    Controls.Dialog {
+        id: categoryDeleteDialog
+        property string categoryId: ""
+        property string targetCategoryName: ""
+        property string errorText: ""
+        modal: true
+        title: i18n("Delete category")
+        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Ok
+
+        function openForCategory(category) {
+            categoryId = category.id
+            targetCategoryName = category.name
+            errorText = ""
+            open()
+        }
+
+        onAccepted: {
+            try {
+                Database.deleteCategory(categoryId)
+                root.reload()
+                close()
+            } catch (error) {
+                errorText = error.message
+            }
+        }
+
+        contentItem: ColumnLayout {
+            implicitWidth: Kirigami.Units.gridUnit * 24
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Delete category \"%1\"? This is only possible after all of its tasks have been moved, archived, or deleted.", categoryDeleteDialog.targetCategoryName)
+                wrapMode: Text.Wrap
+            }
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                visible: categoryDeleteDialog.errorText.length > 0
+                text: categoryDeleteDialog.errorText
+                color: Kirigami.Theme.negativeTextColor
+                wrapMode: Text.Wrap
+                Accessible.name: categoryDeleteDialog.errorText
+            }
+        }
+    }
+
+    Controls.Dialog {
+        id: moveTaskDialog
+        property var task: null
+        modal: true
+        title: i18n("Move task to category")
+        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Ok
+
+        function openForTask(taskToMove) {
+            task = taskToMove
+            moveTaskCategory.currentIndex = 0
+            open()
+            moveTaskCategory.forceActiveFocus()
+        }
+
+        onAccepted: {
+            if (!task || categoryModel.count === 0) {
+                return
+            }
+            Database.moveTask({
+                taskId: task.taskId,
+                targetCategoryId: categoryModel.get(moveTaskCategory.currentIndex).id
+            })
+            root.reload()
+        }
+
+        contentItem: PlasmaComponents.ComboBox {
+            id: moveTaskCategory
+            implicitWidth: Kirigami.Units.gridUnit * 20
+            model: categoryModel
+            textRole: "name"
+            Accessible.name: i18n("Destination category")
         }
     }
 

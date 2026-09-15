@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
@@ -12,6 +13,12 @@ Kirigami.AbstractCard {
     signal openRequested()
     signal timerRequested()
     signal statusRequested(string status)
+    property bool canMoveUp: false
+    property bool canMoveDown: false
+    signal moveUpRequested()
+    signal moveDownRequested()
+    signal moveToCategoryRequested()
+    signal dropRequested(string sourceTaskId)
 
     implicitHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
 
@@ -66,6 +73,74 @@ Kirigami.AbstractCard {
             icon.name: "document-edit"
             Accessible.name: i18n("Open details for %1", root.task.title)
             onClicked: root.openRequested()
+        }
+
+        PlasmaComponents.ToolButton {
+            id: dragHandle
+            icon.name: "openhand-cursor"
+            Accessible.name: i18n("Drag %1 to reorder or move it", root.task.title)
+        }
+
+        PlasmaComponents.ToolButton {
+            id: taskActionsButton
+            icon.name: "overflow-menu"
+            Accessible.name: i18n("Task actions for %1", root.task.title)
+            onClicked: taskActionsMenu.popup()
+        }
+    }
+
+    Drag.active: dragHandler.active
+    Drag.hotSpot.x: width / 2
+    Drag.hotSpot.y: height / 2
+    Drag.keys: ["application/x-worktodo-task"]
+    Drag.mimeData: ({ "application/x-worktodo-task": root.task.taskId })
+
+    DragHandler {
+        id: dragHandler
+        parent: dragHandle
+        target: root
+        onActiveChanged: {
+            root.opacity = active ? 0.55 : 1.0
+            if (!active) {
+                root.Drag.drop()
+            }
+        }
+    }
+
+    DropArea {
+        anchors.fill: parent
+        keys: ["application/x-worktodo-task"]
+        onDropped: function(drop) {
+            if (drop.source && drop.source.task && drop.source.task.taskId !== root.task.taskId) {
+                root.dropRequested(drop.source.task.taskId)
+                drop.acceptProposedAction()
+            }
+        }
+    }
+
+    Controls.Menu {
+        id: taskActionsMenu
+
+        Controls.MenuItem {
+            text: i18n("Move up")
+            enabled: root.canMoveUp
+            Accessible.name: i18n("Move %1 up", root.task.title)
+            onTriggered: root.moveUpRequested()
+        }
+
+        Controls.MenuItem {
+            text: i18n("Move down")
+            enabled: root.canMoveDown
+            Accessible.name: i18n("Move %1 down", root.task.title)
+            onTriggered: root.moveDownRequested()
+        }
+
+        Controls.MenuSeparator {}
+
+        Controls.MenuItem {
+            text: i18n("Move to category...")
+            Accessible.name: i18n("Move %1 to another category", root.task.title)
+            onTriggered: root.moveToCategoryRequested()
         }
     }
 
