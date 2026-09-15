@@ -15,13 +15,15 @@ Controls.Dialog {
     parent: root.board
     property string taskId: ""
     property var task: null
+    property bool showDescriptionPreview: false
+    property bool manualSessionOpen: false
+    property bool manualSessionLongConfirmed: false
     readonly property bool hasManualCorrections: root.task && (
         root.task.workSessions.some(function(session) { return session.manually_edited })
         || root.task.statusEvents.some(function(event) { return event.manually_edited })
     )
     modal: true
     title: root.task ? root.task.title : i18n("Task details")
-    standardButtons: Controls.Dialog.Close
     width: Math.min(root.board.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 32)
     height: Math.min(root.board.height - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 42)
 
@@ -33,6 +35,7 @@ Controls.Dialog {
         }
         titleField.text = root.task.title
         descriptionField.text = root.task.details
+        showDescriptionPreview = false
         statusField.currentIndex = statusField.indexOfValue(root.task.status)
         for (let index = 0; index < root.board.categories.count; index += 1) {
             if (root.board.categories.get(index).id === root.task.category_id) {
@@ -65,6 +68,7 @@ Controls.Dialog {
     }
 
     function openWorkSessionEditor(session) {
+        longSessionConfirmation.inlineSession = false
         workSessionEditor.session = session
         workSessionEditor.title = session ? i18n("Edit work session") : i18n("Add work session")
         workSessionEditor.timezoneId = session ? session.timezone_id : root.board.reportTimezone
@@ -79,6 +83,19 @@ Controls.Dialog {
         workSessionEndOffset.model = []
         workSessionError.text = ""
         workSessionEditor.open()
+    }
+
+    function openManualSessionForm() {
+        longSessionConfirmation.inlineSession = false
+        const now = WorkTodoTime.TimeMath.localPartsForUtc(new Date().toISOString(), root.board.reportTimezone)
+        manualSessionStartField.text = now.valid ? now.date + " " + twoDigits(now.hour) + ":" + twoDigits(now.minute) : ""
+        manualSessionDurationField.text = "01:00"
+        manualSessionStartOffset.model = []
+        manualSessionError.text = ""
+        manualSessionLongConfirmed = false
+        manualSessionOpen = true
+        refreshManualSessionChoices()
+        manualSessionStartField.forceActiveFocus()
     }
 
     function twoDigits(value) {
@@ -128,6 +145,77 @@ Controls.Dialog {
                     twoDigits(Math.floor((absoluteOffset % 3600) / 60)), parts.timeZoneAbbreviation)
             }
         })
+    }
+
+    function manualStartCandidates() {
+        const match = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2})$/.exec(manualSessionStartField.text)
+        if (!match) {
+            return { valid: false, error: i18n("Use a start date and time in YYYY-MM-DD HH:MM format.") }
+        }
+        return WorkTodoTime.TimeMath.possibleUtcInstantsForLocal(
+            Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4]), Number(match[5]), 0, 0,
+            root.board.reportTimezone
+        )
+    }
+
+    function manualOffsetChoices(candidates) {
+        return candidates.utcInstants.map(function(utc) {
+            const parts = WorkTodoTime.TimeMath.localPartsForUtc(utc, root.board.reportTimezone)
+            const offset = Number(parts.offsetSeconds)
+            const sign = offset < 0 ? "-" : "+"
+            const absoluteOffset = Math.abs(offset)
+            return {
+                value: utc,
+                label: i18n("UTC%1%2:%3 (%4)", sign, twoDigits(Math.floor(absoluteOffset / 3600)),
+                    twoDigits(Math.floor((absoluteOffset % 3600) / 60)), parts.timeZoneAbbreviation)
+            }
+        })
+    }
+
+    function refreshManualSessionChoices() {
+        const candidates = manualStartCandidates()
+        manualSessionStartOffset.model = candidates.valid ? manualOffsetChoices(candidates) : []
+        manualSessionStartOffset.currentIndex = candidates.valid && candidates.utcInstants.length === 1 ? 0 : -1
+    }
+
+    function manualDurationSeconds() {
+        const match = /^(\d{1,3}):(\d{2})$/.exec(manualSessionDurationField.text)
+        if (!match || Number(match[2]) >= 60) {
+            fail(i18n("Use a duration in hours and minutes, for example 01:30."))
+        }
+        const seconds = (Number(match[1]) * 60 + Number(match[2])) * 60
+        if (seconds <= 0) {
+            fail(i18n("The duration must be greater than zero."))
+        }
+        return seconds
+    }
+
+    function saveInlineManualSession() {
+        const candidates = manualStartCandidates()
+        const startedAtUtc = selectedUtc(candidates, manualSessionStartOffset, i18n("start"))
+        const durationSeconds = manualDurationSeconds()
+        if (!manualSessionLongConfirmed && durationSeconds / 3600 >= root.board.unusualSessionHours) {
+            longSessionConfirmation.durationText = root.board.formatSeconds(durationSeconds)
+            longSessionConfirmation.inlineSession = true
+            longSessionConfirmation.open()
+            return
+        }
+        Database.createWorkSession({
+            taskId: root.taskId,
+            startedAtUtc: startedAtUtc,
+            endedAtUtc: new Date(Date.parse(startedAtUtc) + durationSeconds * 1000).toISOString(),
+            timezoneId: root.board.reportTimezone
+        })
+        manualSessionOpen = false
+        root.refreshTask()
+    }
+
+    function attemptInlineManualSessionSave() {
+        try {
+            root.saveInlineManualSession()
+        } catch (error) {
+            manualSessionError.text = error.message
+        }
     }
 
     function refreshOffsetChoices() {
@@ -228,66 +316,129 @@ Controls.Dialog {
     }
 
     contentItem: Controls.ScrollView {
+        id: detailsScroll
         implicitWidth: Kirigami.Units.gridUnit * 30
         implicitHeight: Kirigami.Units.gridUnit * 36
         clip: true
+        leftPadding: Kirigami.Units.largeSpacing
+        // Plasma renders scrollbars as an overlay, so reserve its width rather
+        // than allowing fields and controls to disappear beneath it.
+        rightPadding: Kirigami.Units.largeSpacing + Kirigami.Units.iconSizes.small
+        topPadding: Kirigami.Units.largeSpacing
+        bottomPadding: Kirigami.Units.largeSpacing
+        contentWidth: availableWidth
 
         ColumnLayout {
-            width: parent.width
+            width: detailsScroll.availableWidth
             spacing: Kirigami.Units.largeSpacing
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Task details")
+                font.bold: true
+                color: Kirigami.Theme.textColor
+            }
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Title")
+                color: Kirigami.Theme.disabledTextColor
+            }
 
             PlasmaComponents.TextField {
                 id: titleField
                 Layout.fillWidth: true
-                placeholderText: i18n("Task title")
-                onEditingFinished: root.saveTask()
+                placeholderText: i18n("Give this task a clear, actionable name")
+                Accessible.name: i18n("Task title")
             }
 
             RowLayout {
                 Layout.fillWidth: true
+                spacing: Kirigami.Units.largeSpacing
 
-                PlasmaComponents.ComboBox {
-                    id: categoryField
+                ColumnLayout {
                     Layout.fillWidth: true
-                    model: root.board.categories
-                    textRole: "name"
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.Label {
+                        text: i18n("Category")
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+
+                    PlasmaComponents.ComboBox {
+                        id: categoryField
+                        Layout.fillWidth: true
+                        model: root.board.categories
+                        textRole: "name"
+                        Accessible.name: i18n("Task category")
+                    }
                 }
 
-                PlasmaComponents.ComboBox {
-                    id: statusField
+                ColumnLayout {
                     Layout.fillWidth: true
-                    model: ["backlog", "ready", "in_progress", "blocked", "completed"]
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.Label {
+                        text: i18n("Status")
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+
+                    PlasmaComponents.ComboBox {
+                        id: statusField
+                        Layout.fillWidth: true
+                        model: ["backlog", "ready", "in_progress", "blocked", "completed"]
+                        Accessible.name: i18n("Task status")
+                    }
                 }
+            }
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Description")
+                color: Kirigami.Theme.disabledTextColor
             }
 
             PlasmaComponents.TextArea {
                 id: descriptionField
                 Layout.fillWidth: true
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 10
-                placeholderText: i18n("Description (Markdown supported)")
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 9
+                placeholderText: i18n("Add context, notes, or Markdown")
+                Accessible.name: i18n("Task description")
                 wrapMode: TextEdit.Wrap
             }
 
-            PlasmaComponents.Button {
-                Layout.alignment: Qt.AlignRight
-                text: i18n("Save changes")
-                Accessible.name: i18n("Save task changes")
-                onClicked: root.saveTask()
-            }
-
-            Kirigami.Heading {
+            RowLayout {
                 Layout.fillWidth: true
-                level: 4
-                text: i18n("Preview")
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: i18n("Markdown is supported")
+                    color: Kirigami.Theme.disabledTextColor
+                }
+
+                PlasmaComponents.Button {
+                    text: root.showDescriptionPreview ? i18n("Edit description") : i18n("Preview")
+                    checkable: true
+                    checked: root.showDescriptionPreview
+                    onClicked: root.showDescriptionPreview = checked
+                }
             }
 
             Text {
                 Layout.fillWidth: true
+                visible: root.showDescriptionPreview
                 text: Markdown.localOnly(descriptionField.text)
                 textFormat: Text.MarkdownText
                 wrapMode: Text.Wrap
                 color: Kirigami.Theme.textColor
                 onLinkActivated: function(link) {}
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: Kirigami.Theme.disabledTextColor
+                opacity: 0.35
             }
 
             RowLayout {
@@ -331,9 +482,76 @@ Controls.Dialog {
 
             PlasmaComponents.Button {
                 Layout.alignment: Qt.AlignLeft
-                text: i18n("Add manual work session")
+                text: root.manualSessionOpen ? i18n("Cancel adding session") : i18n("Add work session")
                 Accessible.name: text
-                onClicked: root.openWorkSessionEditor(null)
+                onClicked: {
+                    if (root.manualSessionOpen) {
+                        root.manualSessionOpen = false
+                    } else {
+                        root.openManualSessionForm()
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: root.manualSessionOpen
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: i18n("Start date and time")
+                    color: Kirigami.Theme.disabledTextColor
+                }
+
+                PlasmaComponents.TextField {
+                    id: manualSessionStartField
+                    Layout.fillWidth: true
+                    placeholderText: i18n("YYYY-MM-DD HH:MM")
+                    Accessible.name: i18n("Work session start date and time")
+                    onEditingFinished: root.refreshManualSessionChoices()
+                }
+
+                PlasmaComponents.ComboBox {
+                    id: manualSessionStartOffset
+                    Layout.fillWidth: true
+                    visible: count > 1
+                    textRole: "label"
+                    valueRole: "value"
+                    Accessible.name: i18n("Start-time UTC offset")
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: i18n("Duration")
+                    color: Kirigami.Theme.disabledTextColor
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    PlasmaComponents.TextField {
+                        id: manualSessionDurationField
+                        Layout.fillWidth: true
+                        placeholderText: i18n("HH:MM")
+                        Accessible.name: i18n("Work session duration in hours and minutes")
+                    }
+
+                    PlasmaComponents.Button {
+                        text: i18n("Add session")
+                        highlighted: true
+                        onClicked: root.attemptInlineManualSessionSave()
+                    }
+                }
+
+                PlasmaComponents.Label {
+                    id: manualSessionError
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                    color: Kirigami.Theme.negativeTextColor
+                    wrapMode: Text.Wrap
+                    Accessible.name: text
+                }
             }
 
             Repeater {
@@ -364,6 +582,13 @@ Controls.Dialog {
                             i18n("work session starting %1", root.board.formatTimestamp(modelData.started_at_utc)))
                     }
                 }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: Kirigami.Theme.disabledTextColor
+                opacity: 0.35
             }
 
             Kirigami.Heading {
@@ -410,6 +635,13 @@ Controls.Dialog {
                 Accessible.name: text
             }
 
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: Kirigami.Theme.disabledTextColor
+                opacity: 0.35
+            }
+
             RowLayout {
                 Layout.fillWidth: true
 
@@ -429,6 +661,20 @@ Controls.Dialog {
                     onClicked: deleteConfirmation.open()
                 }
             }
+        }
+    }
+
+    footer: Controls.DialogButtonBox {
+        Controls.Button {
+            text: i18n("Close")
+            onClicked: root.close()
+        }
+
+        Controls.Button {
+            text: i18n("Save changes")
+            highlighted: true
+            Accessible.name: i18n("Save task changes")
+            onClicked: root.saveTask()
         }
     }
 
@@ -558,6 +804,7 @@ Controls.Dialog {
         parent: root.contentItem
         modal: true
         property string durationText: ""
+        property bool inlineSession: false
         title: i18n("Unusually long work session")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Yes
         contentItem: PlasmaComponents.Label {
@@ -568,11 +815,20 @@ Controls.Dialog {
         }
         onAccepted: {
             try {
-                workSessionEditor.longSessionConfirmed = true
-                root.saveWorkSession()
+                if (inlineSession) {
+                    root.manualSessionLongConfirmed = true
+                    root.saveInlineManualSession()
+                } else {
+                    workSessionEditor.longSessionConfirmed = true
+                    root.saveWorkSession()
+                }
             } catch (error) {
-                workSessionError.text = error.message
-                workSessionEditor.open()
+                if (inlineSession) {
+                    manualSessionError.text = error.message
+                } else {
+                    workSessionError.text = error.message
+                    workSessionEditor.open()
+                }
             }
         }
     }
