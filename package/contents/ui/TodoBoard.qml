@@ -14,6 +14,7 @@ Item {
     required property var plasmoidConfiguration
     required property var plasmoidRoot
     property var selectedStatuses: []
+    property alias categories: categoryModel
     readonly property var activeSession: root.plasmoidRoot.activeSession
     readonly property bool hasActiveSession: root.plasmoidRoot.hasActiveSession
     readonly property string activeElapsedText: root.plasmoidRoot.activeElapsedText
@@ -622,6 +623,7 @@ Item {
 
                     delegate: RowLayout {
                         required property var model
+                        required property int index
                         Layout.fillWidth: true
 
                         Rectangle {

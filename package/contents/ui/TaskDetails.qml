@@ -34,8 +34,8 @@ Controls.Dialog {
         titleField.text = root.task.title
         descriptionField.text = root.task.details
         statusField.currentIndex = statusField.indexOfValue(root.task.status)
-        for (let index = 0; index < root.board.categoryModel.count; index += 1) {
-            if (root.board.categoryModel.get(index).id === root.task.category_id) {
+        for (let index = 0; index < root.board.categories.count; index += 1) {
+            if (root.board.categories.get(index).id === root.task.category_id) {
                 categoryField.currentIndex = index
                 break
             }
@@ -47,7 +47,7 @@ Controls.Dialog {
         if (!root.task) {
             return
         }
-        const categoryId = root.board.categoryModel.get(categoryField.currentIndex).id
+        const categoryId = root.board.categories.get(categoryField.currentIndex).id
         Database.saveTask({
             id: root.taskId,
             title: titleField.text,
@@ -249,7 +249,7 @@ Controls.Dialog {
                 PlasmaComponents.ComboBox {
                     id: categoryField
                     Layout.fillWidth: true
-                    model: root.board.categoryModel
+                    model: root.board.categories
                     textRole: "name"
                 }
 

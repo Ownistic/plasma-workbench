@@ -37,6 +37,11 @@ Kirigami.AbstractCard {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
 
+            TapHandler {
+                acceptedButtons: Qt.LeftButton
+                onTapped: root.openRequested()
+            }
+
             PlasmaComponents.Label {
                 Layout.fillWidth: true
                 text: root.task.title
@@ -85,7 +90,7 @@ Kirigami.AbstractCard {
             id: taskActionsButton
             icon.name: "overflow-menu"
             Accessible.name: i18n("Task actions for %1", root.task.title)
-            onClicked: taskActionsMenu.popup()
+            onClicked: taskActionsMenu.popup(taskActionsButton, 0, taskActionsButton.height)
         }
     }
 
@@ -144,12 +149,4 @@ Kirigami.AbstractCard {
         }
     }
 
-    TapHandler {
-        acceptedButtons: Qt.LeftButton
-        onTapped: function(eventPoint, button) {
-            if (eventPoint.position.x < root.width - Kirigami.Units.gridUnit * 5) {
-                root.openRequested()
-            }
-        }
-    }
 }
