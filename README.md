@@ -34,6 +34,14 @@ kpackagetool6 --type Plasma/Applet --install build/work-todo-0.1.0.plasmoid
 
 The `package-plasmoid` target stages `package/`, uses a fixed `SOURCE_DATE_EPOCH`, and writes a ZIP-compatible `.plasmoid` whose root contains `metadata.json` and `contents/`. The native timezone module is placed in `package/contents/ui/time/` during the build and is included with the archive.
 
+Use the convenience scripts for a user-scoped install, upgrade, or removal:
+
+```sh
+./scripts/install.sh
+./scripts/update.sh
+./scripts/remove.sh
+```
+
 With `kpackagetool6` available at configure time, run the isolated archive-install smoke test after building the release target:
 
 ```sh
