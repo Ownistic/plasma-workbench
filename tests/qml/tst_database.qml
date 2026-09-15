@@ -183,13 +183,106 @@ TestCase {
         compare(report.byTask[0].id, task.id)
     }
 
-    function test_categoryDeletionRequiresEmptyCategory() {
+    function test_categoryTrashRetainsReportHistory() {
         const category = createCategory("Product")
-        createTask(category.id, "Keep me")
+        const task = createTask(category.id, "Keep me")
+        Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2024-01-01T09:00:00.000Z",
+            endedAtUtc: "2024-01-01T10:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+
+        Database.deleteCategory(category.id)
+
+        const trashed = Database.listTrashedCategories()
+        compare(trashed.length, 1)
+        compare(trashed[0].id, category.id)
+        verify(trashed[0].trashed_at_utc !== null)
+        compare(Database.listReportSessions("2024-01-01T00:00:00.000Z", "2024-01-02T00:00:00.000Z", "2024-01-02T00:00:00.000Z").length, 1)
+    }
+
+    function test_categoryTrashHidesNormalCategoryAndTaskLists() {
+        const category = createCategory("Product")
+        createTask(category.id, "Hidden task")
+
+        Database.deleteCategory(category.id)
+
+        compare(Database.listCategories().length, 0)
+        compare(Database.listTasks({}).length, 0)
+    }
+
+    function test_trashedCategoryRejectsNewTasksAndReordering() {
+        const first = createCategory("First")
+        const second = createCategory("Second")
+        const task = createTask(second.id, "Existing task")
+        Database.deleteCategory(first.id)
 
         assertThrows(function() {
-            Database.deleteCategory(category.id)
-        }, "Move, archive, or delete")
+            Database.createTask({ categoryId: first.id, title: "Hidden task", status: "ready" })
+        }, "trash")
+        assertThrows(function() {
+            Database.moveTask({ taskId: task.id, targetCategoryId: first.id })
+        }, "trash")
+    }
+
+    function test_newAndRestoredCategoriesAvoidTrashedPositions() {
+        const first = createCategory("First")
+        const second = createCategory("Second")
+        Database.deleteCategory(second.id)
+
+        const third = createCategory("Third")
+        Database.restoreCategory(second.id)
+
+        const categories = Database.listCategories()
+        compare(categories.length, 3)
+        verify(categories[0].position !== categories[1].position)
+        verify(categories[1].position !== categories[2].position)
+        compare(categories[2].id, second.id)
+        compare(third.id, categories[1].id)
+    }
+
+    function test_titleLimitCountsUnicodeCodePoints() {
+        const category = createCategory("Product")
+        const withinLimit = "😀".repeat(200)
+        const task = createTask(category.id, withinLimit)
+        compare(Database.getTask(task.id).title, withinLimit)
+
+        assertThrows(function() {
+            createTask(category.id, "😀".repeat(201))
+        }, "between 1 and 200")
+    }
+
+    function test_restoreCategoryReturnsItAndItsTasksToNormalLists() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Restored task")
+        Database.deleteCategory(category.id)
+
+        Database.restoreCategory(category.id)
+
+        compare(Database.listTrashedCategories().length, 0)
+        compare(Database.listCategories()[0].id, category.id)
+        compare(Database.listTasks({})[0].taskId, task.id)
+    }
+
+    function test_purgeExpiredTrashPermanentlyDeletesCategoryChildren() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Expired task")
+        Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2024-01-01T09:00:00.000Z",
+            endedAtUtc: "2024-01-01T10:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+        Database.deleteCategory(category.id)
+
+        const purgeTime = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString()
+        compare(Database.purgeExpiredTrash(purgeTime), 1)
+
+        compare(Database.listTrashedCategories().length, 0)
+        compare(Database.listWorkSessions(task.id).length, 0)
+        compare(Database.listStatusEvents(task.id).length, 0)
+        compare(Database.listReportSessions("2024-01-01T00:00:00.000Z", "2024-01-02T00:00:00.000Z", "2024-01-02T00:00:00.000Z").length, 0)
     }
 
     function test_statusChangeRejectsHistoricalTimestampAndCorrectionStopsTimer() {

@@ -11,3 +11,10 @@ add_test(
 set_tests_properties(DatabaseRepository PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
+
+add_custom_target(benchmark-repository
+    COMMAND ${QMLTESTRUNNER} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark
+    DEPENDS worktodo_timeplugin
+    COMMENT "Benchmarking 5,000 tasks and 100,000 work sessions"
+    VERBATIM
+)

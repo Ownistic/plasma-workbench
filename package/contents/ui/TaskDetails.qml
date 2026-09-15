@@ -6,6 +6,7 @@ import org.kde.plasma.components as PlasmaComponents
 
 import "../code/Database.js" as Database
 import "../code/Markdown.js" as Markdown
+import "time" as WorkTodoTime
 
 Controls.Dialog {
     id: root
@@ -62,6 +63,36 @@ Controls.Dialog {
         root.board.reload()
     }
 
+    function openWorkSessionEditor(session) {
+        workSessionEditor.session = session
+        workSessionEditor.title = session ? i18n("Edit work session") : i18n("Add work session")
+        workSessionEditor.timezoneId = session ? session.timezone_id : root.board.reportTimezone
+        const start = session ? WorkTodoTime.TimeMath.localPartsForUtc(session.started_at_utc, workSessionEditor.timezoneId) : null
+        const end = session && session.ended_at_utc
+            ? WorkTodoTime.TimeMath.localPartsForUtc(session.ended_at_utc, workSessionEditor.timezoneId) : null
+        workSessionDateField.text = start && start.valid ? start.date : ""
+        workSessionEndDateField.text = end && end.valid ? end.date : workSessionDateField.text
+        workSessionStartField.text = start && start.valid ? localTimeText(start) : ""
+        workSessionEndField.text = end && end.valid ? localTimeText(end) : ""
+        workSessionStartOffset.model = []
+        workSessionEndOffset.model = []
+        workSessionError.text = ""
+        workSessionEditor.open()
+    }
+
+    function twoDigits(value) {
+        return value < 10 ? "0" + value : String(value)
+    }
+
+    function threeDigits(value) {
+        return value < 10 ? "00" + value : value < 100 ? "0" + value : String(value)
+    }
+
+    function localTimeText(parts) {
+        return twoDigits(parts.hour) + ":" + twoDigits(parts.minute) + ":" + twoDigits(parts.second)
+            + "." + threeDigits(parts.millisecond)
+    }
+
     function validUtcInstant(value) {
         if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
             return false
@@ -70,13 +101,114 @@ Controls.Dialog {
         return !isNaN(date.getTime()) && date.toISOString() === value
     }
 
-    function openWorkSessionEditor(session) {
-        workSessionEditor.session = session
-        workSessionEditor.title = session ? i18n("Edit work session") : i18n("Add work session")
-        workSessionStartField.text = session ? session.started_at_utc : ""
-        workSessionEndField.text = session ? session.ended_at_utc : ""
-        workSessionError.text = ""
-        workSessionEditor.open()
+    function localDateTimeCandidates(dateText, timeText) {
+        const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText)
+        const time = /^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(timeText)
+        if (!date || !time) {
+            return { valid: false, error: i18n("Use a date in YYYY-MM-DD and a time in HH:MM format.") }
+        }
+        return WorkTodoTime.TimeMath.possibleUtcInstantsForLocal(
+            Number(date[1]), Number(date[2]), Number(date[3]), Number(time[1]), Number(time[2]),
+            time[3] === undefined ? 0 : Number(time[3]),
+            time[4] === undefined ? 0 : Number((time[4] + "000").slice(0, 3)),
+            workSessionEditor.timezoneId
+        )
+    }
+
+    function offsetChoices(candidates) {
+        return candidates.utcInstants.map(function(utc) {
+            const parts = WorkTodoTime.TimeMath.localPartsForUtc(utc, workSessionEditor.timezoneId)
+            const offset = Number(parts.offsetSeconds)
+            const sign = offset < 0 ? "-" : "+"
+            const absoluteOffset = Math.abs(offset)
+            return {
+                value: utc,
+                label: i18n("UTC%1%2:%3 (%4)", sign, twoDigits(Math.floor(absoluteOffset / 3600)),
+                    twoDigits(Math.floor((absoluteOffset % 3600) / 60)), parts.timeZoneAbbreviation)
+            }
+        })
+    }
+
+    function refreshOffsetChoices() {
+        const start = localDateTimeCandidates(workSessionDateField.text, workSessionStartField.text)
+        const end = localDateTimeCandidates(workSessionEndDateField.text, workSessionEndField.text)
+        workSessionStartOffset.model = start.valid ? offsetChoices(start) : []
+        workSessionEndOffset.model = end.valid ? offsetChoices(end) : []
+        workSessionStartOffset.currentIndex = start.valid && start.utcInstants.length === 1 ? 0 : -1
+        workSessionEndOffset.currentIndex = end.valid && end.utcInstants.length === 1 ? 0 : -1
+    }
+
+    function selectedUtc(candidates, selector, label) {
+        if (!candidates.valid) {
+            fail(candidates.error)
+        }
+        if (candidates.utcInstants.length > 1 && selector.currentIndex < 0) {
+            fail(i18n("Choose the UTC offset for the ambiguous %1 time.", label))
+        }
+        return candidates.utcInstants.length === 1 ? candidates.utcInstants[0] : selector.currentValue
+    }
+
+    function fail(message) {
+        throw new Error(message)
+    }
+
+    function saveWorkSession() {
+        const startCandidates = localDateTimeCandidates(workSessionDateField.text, workSessionStartField.text)
+        const endCandidates = localDateTimeCandidates(workSessionEndDateField.text, workSessionEndField.text)
+        const startedAtUtc = selectedUtc(startCandidates, workSessionStartOffset, i18n("start"))
+        const endedAtUtc = selectedUtc(endCandidates, workSessionEndOffset, i18n("end"))
+        if (Date.parse(endedAtUtc) < Date.parse(startedAtUtc)) {
+            fail(i18n("The end time cannot be before the start time."))
+        }
+        const durationHours = (Date.parse(endedAtUtc) - Date.parse(startedAtUtc)) / (60 * 60 * 1000)
+        if (!workSessionEditor.longSessionConfirmed && durationHours >= root.board.unusualSessionHours) {
+            longSessionConfirmation.durationText = root.board.formatSeconds(durationHours * 3600)
+            longSessionConfirmation.open()
+            return
+        }
+        if (workSessionEditor.session) {
+            Database.updateWorkSession({
+                id: workSessionEditor.session.id,
+                startedAtUtc: startedAtUtc,
+                endedAtUtc: endedAtUtc,
+                timezoneId: workSessionEditor.timezoneId
+            })
+        } else {
+            Database.createWorkSession({
+                taskId: root.taskId,
+                startedAtUtc: startedAtUtc,
+                endedAtUtc: endedAtUtc,
+                timezoneId: workSessionEditor.timezoneId
+            })
+        }
+        root.refreshTask()
+        workSessionEditor.close()
+    }
+
+    function attemptWorkSessionSave() {
+        try {
+            root.saveWorkSession()
+        } catch (error) {
+            workSessionError.text = error.message
+        }
+    }
+
+    function attemptStatusEventSave() {
+        if (!root.validUtcInstant(statusEventTimeField.text)) {
+            statusEventError.text = i18n("The event time must be a valid UTC ISO timestamp.")
+            return
+        }
+        try {
+            Database.updateStatusEvent({
+                id: statusEventEditor.event.id,
+                status: statusEventField.currentValue,
+                occurredAtUtc: statusEventTimeField.text
+            })
+            root.refreshTask()
+            statusEventEditor.close()
+        } catch (error) {
+            statusEventError.text = error.message
+        }
     }
 
     function openStatusEventEditor(event) {
@@ -210,25 +342,25 @@ Controls.Dialog {
                     required property var modelData
                     Layout.fillWidth: true
 
-                    PlasmaComponents.Label {
-                        Layout.fillWidth: true
-                        text: modelData.started_at_utc + (modelData.ended_at_utc
-                            ? " - " + modelData.ended_at_utc : i18n(" (active)"))
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: root.board.formatTimestamp(modelData.started_at_utc) + (modelData.ended_at_utc
+                    ? " - " + root.board.formatTimestamp(modelData.ended_at_utc) : i18n(" (active)"))
                             + (modelData.manually_edited ? i18n(" (corrected)") : "")
                         wrapMode: Text.Wrap
                     }
 
                     PlasmaComponents.Button {
                         text: i18n("Edit")
-                        Accessible.name: i18n("Edit work session starting %1", modelData.started_at_utc)
+                        Accessible.name: i18n("Edit work session starting %1", root.board.formatTimestamp(modelData.started_at_utc))
                         onClicked: root.openWorkSessionEditor(modelData)
                     }
 
                     PlasmaComponents.Button {
                         text: i18n("Delete")
-                        Accessible.name: i18n("Delete work session starting %1", modelData.started_at_utc)
+                        Accessible.name: i18n("Delete work session starting %1", root.board.formatTimestamp(modelData.started_at_utc))
                         onClicked: root.confirmCorrectionDeletion("workSession", modelData.id,
-                            i18n("work session starting %1", modelData.started_at_utc))
+                            i18n("work session starting %1", root.board.formatTimestamp(modelData.started_at_utc)))
                     }
                 }
             }
@@ -248,22 +380,22 @@ Controls.Dialog {
 
                     PlasmaComponents.Label {
                         Layout.fillWidth: true
-                        text: modelData.occurred_at_utc + ": " + modelData.status.replace("_", " ")
+                        text: root.board.formatTimestamp(modelData.occurred_at_utc) + ": " + modelData.status.replace("_", " ")
                             + (modelData.manually_edited ? i18n(" (corrected)") : "")
                         wrapMode: Text.Wrap
                     }
 
                     PlasmaComponents.Button {
                         text: i18n("Edit")
-                        Accessible.name: i18n("Edit status event at %1", modelData.occurred_at_utc)
+                        Accessible.name: i18n("Edit status event at %1", root.board.formatTimestamp(modelData.occurred_at_utc))
                         onClicked: root.openStatusEventEditor(modelData)
                     }
 
                     PlasmaComponents.Button {
                         text: i18n("Delete")
-                        Accessible.name: i18n("Delete status event at %1", modelData.occurred_at_utc)
+                        Accessible.name: i18n("Delete status event at %1", root.board.formatTimestamp(modelData.occurred_at_utc))
                         onClicked: root.confirmCorrectionDeletion("statusEvent", modelData.id,
-                            i18n("status event at %1", modelData.occurred_at_utc))
+                            i18n("status event at %1", root.board.formatTimestamp(modelData.occurred_at_utc)))
                     }
                 }
             }
@@ -333,29 +465,71 @@ Controls.Dialog {
         parent: root.parent
         modal: true
         property var session: null
-        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
+        property string timezoneId: ""
+        property bool longSessionConfirmed: false
+        standardButtons: 0
+        onOpened: {
+            longSessionConfirmed = false
+            root.refreshOffsetChoices()
+        }
         contentItem: ColumnLayout {
             width: Kirigami.Units.gridUnit * 28
             spacing: Kirigami.Units.smallSpacing
 
             PlasmaComponents.Label {
                 Layout.fillWidth: true
-                text: i18n("Enter UTC ISO timestamps, for example 2026-01-31T09:30:00.000Z.")
+                text: i18n("Enter local date and times in %1.", workSessionEditor.timezoneId)
                 wrapMode: Text.Wrap
+            }
+
+            PlasmaComponents.TextField {
+                id: workSessionDateField
+                Layout.fillWidth: true
+                placeholderText: i18n("Date (YYYY-MM-DD)")
+                Accessible.name: i18n("Work session local date")
+                onEditingFinished: root.refreshOffsetChoices()
             }
 
             PlasmaComponents.TextField {
                 id: workSessionStartField
                 Layout.fillWidth: true
-                placeholderText: i18n("Start time (UTC ISO)")
-                Accessible.name: i18n("Work session start time in UTC ISO format")
+                placeholderText: i18n("Start time (HH:MM[:SS.mmm])")
+                Accessible.name: i18n("Work session local start time")
+                onEditingFinished: root.refreshOffsetChoices()
+            }
+
+            PlasmaComponents.ComboBox {
+                id: workSessionStartOffset
+                Layout.fillWidth: true
+                visible: model.length > 1
+                textRole: "label"
+                valueRole: "value"
+                Accessible.name: i18n("Start-time UTC offset")
             }
 
             PlasmaComponents.TextField {
                 id: workSessionEndField
                 Layout.fillWidth: true
-                placeholderText: i18n("End time (UTC ISO)")
-                Accessible.name: i18n("Work session end time in UTC ISO format")
+                placeholderText: i18n("End time (HH:MM[:SS.mmm])")
+                Accessible.name: i18n("Work session local end time")
+                onEditingFinished: root.refreshOffsetChoices()
+            }
+
+            PlasmaComponents.TextField {
+                id: workSessionEndDateField
+                Layout.fillWidth: true
+                placeholderText: i18n("End date (YYYY-MM-DD)")
+                Accessible.name: i18n("Work session local end date")
+                onEditingFinished: root.refreshOffsetChoices()
+            }
+
+            PlasmaComponents.ComboBox {
+                id: workSessionEndOffset
+                Layout.fillWidth: true
+                visible: model.length > 1
+                textRole: "label"
+                valueRole: "value"
+                Accessible.name: i18n("End-time UTC offset")
             }
 
             PlasmaComponents.Label {
@@ -367,31 +541,38 @@ Controls.Dialog {
                 Accessible.name: text
             }
         }
-        onAccepted: {
-            if (!root.validUtcInstant(workSessionStartField.text)
-                || !root.validUtcInstant(workSessionEndField.text)) {
-                workSessionError.text = i18n("Start and end times must be valid UTC ISO timestamps.")
-                return
+        footer: Controls.DialogButtonBox {
+            Controls.Button {
+                text: i18n("Cancel")
+                onClicked: workSessionEditor.close()
             }
+            Controls.Button {
+                text: i18n("Save")
+                onClicked: root.attemptWorkSessionSave()
+            }
+        }
+    }
+
+    Controls.Dialog {
+        id: longSessionConfirmation
+        parent: root.parent
+        modal: true
+        property string durationText: ""
+        title: i18n("Unusually long work session")
+        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Yes
+        contentItem: PlasmaComponents.Label {
+            width: Kirigami.Units.gridUnit * 24
+            wrapMode: Text.Wrap
+            text: i18n("This session lasts %1, exceeding the %2-hour warning threshold. Save it anyway?",
+                longSessionConfirmation.durationText, root.board.unusualSessionHours)
+        }
+        onAccepted: {
             try {
-                if (session) {
-                    Database.updateWorkSession({
-                        id: session.id,
-                        startedAtUtc: workSessionStartField.text,
-                        endedAtUtc: workSessionEndField.text
-                    })
-                } else {
-                    Database.createWorkSession({
-                        taskId: root.taskId,
-                        startedAtUtc: workSessionStartField.text,
-                        endedAtUtc: workSessionEndField.text,
-                        timezoneId: root.board.reportTimezone
-                    })
-                }
-                root.refreshTask()
-                close()
+                workSessionEditor.longSessionConfirmed = true
+                root.saveWorkSession()
             } catch (error) {
                 workSessionError.text = error.message
+                workSessionEditor.open()
             }
         }
     }
@@ -402,7 +583,7 @@ Controls.Dialog {
         modal: true
         property var event: null
         title: i18n("Edit status event")
-        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
+        standardButtons: 0
         contentItem: ColumnLayout {
             width: Kirigami.Units.gridUnit * 28
             spacing: Kirigami.Units.smallSpacing
@@ -430,21 +611,14 @@ Controls.Dialog {
                 Accessible.name: text
             }
         }
-        onAccepted: {
-            if (!root.validUtcInstant(statusEventTimeField.text)) {
-                statusEventError.text = i18n("The event time must be a valid UTC ISO timestamp.")
-                return
+        footer: Controls.DialogButtonBox {
+            Controls.Button {
+                text: i18n("Cancel")
+                onClicked: statusEventEditor.close()
             }
-            try {
-                Database.updateStatusEvent({
-                    id: event.id,
-                    status: statusEventField.currentValue,
-                    occurredAtUtc: statusEventTimeField.text
-                })
-                root.refreshTask()
-                close()
-            } catch (error) {
-                statusEventError.text = error.message
+            Controls.Button {
+                text: i18n("Save")
+                onClicked: root.attemptStatusEventSave()
             }
         }
     }

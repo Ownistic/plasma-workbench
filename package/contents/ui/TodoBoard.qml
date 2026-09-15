@@ -22,9 +22,19 @@ Item {
         ? root.plasmoidConfiguration.reportTimezone : WorkTodoTime.TimeMath.systemTimeZoneId()
     readonly property int firstDayOfWeek: root.plasmoidConfiguration.firstDayOfWeek >= 1
         && root.plasmoidConfiguration.firstDayOfWeek <= 7 ? root.plasmoidConfiguration.firstDayOfWeek : 1
+    readonly property bool use24HourTime: root.plasmoidConfiguration.use24HourTime !== false
+    readonly property int unusualSessionHours: Math.max(1, Number(root.plasmoidConfiguration.unusualSessionHours || 16))
 
     ListModel { id: taskModel }
     ListModel { id: categoryModel }
+    ListModel { id: visibleCategoryModel }
+
+    Timer {
+        interval: 60 * 60 * 1000
+        repeat: true
+        running: true
+        onTriggered: root.reload()
+    }
 
     function formatSeconds(seconds) {
         return root.plasmoidRoot.formatSeconds(seconds)
@@ -37,6 +47,11 @@ Item {
             ? root.plasmoidRoot.elapsedSeconds(task.activeStartedAt) : 0))
     }
 
+    function formatTimestamp(utc) {
+        const formatted = WorkTodoTime.TimeMath.formatUtcForLocal(utc, root.reportTimezone, root.use24HourTime)
+        return formatted.valid ? formatted.formatted : utc
+    }
+
     function reload() {
         const tasks = Database.listTasks({
             statuses: root.selectedStatuses,
@@ -45,8 +60,12 @@ Item {
         const categories = Database.listCategories()
         taskModel.clear()
         categoryModel.clear()
+        visibleCategoryModel.clear()
         for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex += 1) {
             categoryModel.append(categories[categoryIndex])
+            if (tasks.some(function(task) { return task.categoryId === categories[categoryIndex].id })) {
+                visibleCategoryModel.append(categories[categoryIndex])
+            }
         }
         for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
             taskModel.append(tasks[taskIndex])
@@ -163,6 +182,18 @@ Item {
             }
 
             PlasmaComponents.ToolButton {
+                icon.name: "user-trash"
+                Accessible.name: i18n("Manage category trash")
+                onClicked: categoryTrashDialog.openTrash()
+            }
+
+            PlasmaComponents.ToolButton {
+                icon.name: "view-list-details"
+                Accessible.name: i18n("Manage categories")
+                onClicked: categoryManagementDialog.open()
+            }
+
+            PlasmaComponents.ToolButton {
                 icon.name: "office-chart-bar"
                 Accessible.name: i18n("Open reports")
                 onClicked: reportsDialog.openReport(false)
@@ -228,7 +259,7 @@ Item {
                 }
 
                 Repeater {
-                    model: categoryModel
+                    model: visibleCategoryModel
 
                     delegate: Column {
                         required property var model
@@ -430,7 +461,7 @@ Item {
         property string targetCategoryName: ""
         property string errorText: ""
         modal: true
-        title: i18n("Delete category")
+        title: i18n("Move category to trash")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Ok
 
         function openForCategory(category) {
@@ -455,7 +486,7 @@ Item {
 
             PlasmaComponents.Label {
                 Layout.fillWidth: true
-                text: i18n("Delete category \"%1\"? This is only possible after all of its tasks have been moved, archived, or deleted.", categoryDeleteDialog.targetCategoryName)
+                text: i18n("Move category \"%1\" and its tasks to the trash? You can restore it for 30 days before it is permanently deleted.", categoryDeleteDialog.targetCategoryName)
                 wrapMode: Text.Wrap
             }
 
@@ -501,6 +532,138 @@ Item {
             model: categoryModel
             textRole: "name"
             Accessible.name: i18n("Destination category")
+        }
+    }
+
+    Controls.Dialog {
+        id: categoryTrashDialog
+        modal: true
+        title: i18n("Category trash")
+        standardButtons: Controls.Dialog.Close
+        property var trashedCategories: []
+
+        function openTrash() {
+            trashedCategories = Database.listTrashedCategories()
+            open()
+        }
+
+        contentItem: ColumnLayout {
+            width: Kirigami.Units.gridUnit * 28
+            spacing: Kirigami.Units.smallSpacing
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Categories are permanently deleted 30 days after being moved here.")
+                wrapMode: Text.Wrap
+            }
+
+            PlasmaExtras.PlaceholderMessage {
+                Layout.fillWidth: true
+                visible: categoryTrashDialog.trashedCategories.length === 0
+                text: i18n("Trash is empty")
+            }
+
+            Repeater {
+                model: categoryTrashDialog.trashedCategories
+
+                delegate: RowLayout {
+                    required property var modelData
+                    Layout.fillWidth: true
+
+                    PlasmaComponents.Label {
+                        Layout.fillWidth: true
+                        text: modelData.name + " (" + root.formatTimestamp(modelData.trashed_at_utc) + ")"
+                        elide: Text.ElideRight
+                    }
+
+                    PlasmaComponents.Button {
+                        text: i18n("Restore")
+                        Accessible.name: i18n("Restore category %1", modelData.name)
+                        onClicked: {
+                            Database.restoreCategory(modelData.id)
+                            categoryTrashDialog.trashedCategories = Database.listTrashedCategories()
+                            root.reload()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Controls.Dialog {
+        id: categoryManagementDialog
+        modal: true
+        title: i18n("Manage categories")
+        standardButtons: Controls.Dialog.Close
+        contentItem: Controls.ScrollView {
+            implicitWidth: Kirigami.Units.gridUnit * 30
+            implicitHeight: Kirigami.Units.gridUnit * 26
+            clip: true
+
+            ColumnLayout {
+                width: parent.width
+                spacing: Kirigami.Units.smallSpacing
+
+                PlasmaExtras.PlaceholderMessage {
+                    Layout.fillWidth: true
+                    visible: categoryModel.count === 0
+                    text: i18n("No active categories")
+                }
+
+                Repeater {
+                    model: categoryModel
+
+                    delegate: RowLayout {
+                        required property var model
+                        Layout.fillWidth: true
+
+                        Rectangle {
+                            Layout.preferredWidth: Kirigami.Units.smallSpacing
+                            Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                            color: model.color
+                            radius: width / 2
+                        }
+
+                        PlasmaComponents.Label {
+                            Layout.fillWidth: true
+                            text: model.name
+                            elide: Text.ElideRight
+                        }
+
+                        PlasmaComponents.ToolButton {
+                            icon.name: "go-up"
+                            enabled: index > 0
+                            Accessible.name: i18n("Move category %1 up", model.name)
+                            onClicked: {
+                                Database.moveCategory({ categoryId: model.id, targetCategoryId: categoryModel.get(index - 1).id, placement: "before" })
+                                root.reload()
+                            }
+                        }
+
+                        PlasmaComponents.ToolButton {
+                            icon.name: "go-down"
+                            enabled: index + 1 < categoryModel.count
+                            Accessible.name: i18n("Move category %1 down", model.name)
+                            onClicked: {
+                                Database.moveCategory({ categoryId: model.id, targetCategoryId: categoryModel.get(index + 1).id, placement: "after" })
+                                root.reload()
+                            }
+                        }
+
+                        PlasmaComponents.ToolButton {
+                            icon.name: "document-edit"
+                            Accessible.name: i18n("Edit category %1", model.name)
+                            onClicked: categoryEditorDialog.openForCategory(model)
+                        }
+
+                        PlasmaComponents.ToolButton {
+                            icon.name: "user-trash"
+                            Accessible.name: i18n("Move category %1 to trash", model.name)
+                            onClicked: categoryDeleteDialog.openForCategory(model)
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -1,6 +1,6 @@
 .pragma library
 
-const CURRENT_VERSION = 2
+const CURRENT_VERSION = 5
 
 const migrations = [
     {
@@ -71,6 +71,27 @@ const migrations = [
                 "BEFORE UPDATE OF task_id ON status_events FOR EACH ROW WHEN NOT EXISTS " +
                 "(SELECT 1 FROM tasks WHERE id = NEW.task_id) " +
                 "BEGIN SELECT RAISE(ABORT, 'Status-event task does not exist'); END"
+        ]
+    },
+    {
+        version: 3,
+        statements: [
+            "ALTER TABLE categories ADD COLUMN trashed_at_utc TEXT",
+            "CREATE INDEX IF NOT EXISTS categories_trashed_at_idx ON categories(trashed_at_utc)"
+        ]
+    },
+    {
+        version: 4,
+        statements: [
+            "DROP INDEX IF EXISTS categories_position_idx",
+            "CREATE UNIQUE INDEX IF NOT EXISTS categories_active_position_idx ON categories(position) WHERE trashed_at_utc IS NULL"
+        ]
+    },
+    {
+        version: 5,
+        statements: [
+            "ALTER TABLE tasks ADD COLUMN tracked_seconds INTEGER NOT NULL DEFAULT 0",
+            "UPDATE tasks SET tracked_seconds = COALESCE((SELECT SUM(strftime('%s', ended_at_utc) - strftime('%s', started_at_utc)) FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NOT NULL), 0)"
         ]
     }
 ]

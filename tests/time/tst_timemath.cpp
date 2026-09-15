@@ -12,6 +12,11 @@ private slots:
     void calculatesWeekRange();
     void calculatesMonthRange();
     void convertsUtcToLocalDate();
+    void convertsUtcToLocalParts();
+    void resolvesNormalLocalTime();
+    void detectsLocalDstGap();
+    void detectsAmbiguousLocalTime();
+    void formatsUtcForLocal();
     void rejectsInvalidInput();
     void clampsToReportRange();
 };
@@ -86,6 +91,69 @@ void TimeMathTest::convertsUtcToLocalDate()
                  QStringLiteral("2024-01-01T00:00:00.000Z"),
                  QStringLiteral("Mars/Olympus"))
                 .isEmpty());
+}
+
+void TimeMathTest::convertsUtcToLocalParts()
+{
+    TimeMath timeMath;
+    const QVariantMap parts = timeMath.localPartsForUtc(
+        QStringLiteral("2024-01-15T12:05:06.007Z"), QStringLiteral("America/New_York"));
+
+    QVERIFY(parts.value(QStringLiteral("valid")).toBool());
+    QCOMPARE(parts.value(QStringLiteral("date")).toString(), QStringLiteral("2024-01-15"));
+    QCOMPARE(parts.value(QStringLiteral("time")).toString(), QStringLiteral("07:05:06.007"));
+    QCOMPARE(parts.value(QStringLiteral("year")).toInt(), 2024);
+    QCOMPARE(parts.value(QStringLiteral("hour")).toInt(), 7);
+    QCOMPARE(parts.value(QStringLiteral("offsetSeconds")).toInt(), -5 * 3600);
+}
+
+void TimeMathTest::resolvesNormalLocalTime()
+{
+    TimeMath timeMath;
+    const QVariantMap result = timeMath.possibleUtcInstantsForLocal(
+        2024, 1, 15, 13, 5, 0, 0, QStringLiteral("America/New_York"));
+
+    QVERIFY(result.value(QStringLiteral("valid")).toBool());
+    QVERIFY(!result.value(QStringLiteral("ambiguous")).toBool());
+    QCOMPARE(result.value(QStringLiteral("utcInstants")).toList(),
+             QVariantList({QStringLiteral("2024-01-15T18:05:00.000Z")}));
+}
+
+void TimeMathTest::detectsLocalDstGap()
+{
+    TimeMath timeMath;
+    const QVariantMap result = timeMath.possibleUtcInstantsForLocal(
+        2024, 3, 31, 2, 30, 0, 0, QStringLiteral("Europe/Berlin"));
+
+    QVERIFY(!result.value(QStringLiteral("valid")).toBool());
+    QCOMPARE(result.value(QStringLiteral("error")).toString(),
+             QStringLiteral("The local date and time does not exist in this time zone."));
+}
+
+void TimeMathTest::detectsAmbiguousLocalTime()
+{
+    TimeMath timeMath;
+    const QVariantMap result = timeMath.possibleUtcInstantsForLocal(
+        2024, 10, 27, 2, 30, 0, 0, QStringLiteral("Europe/Berlin"));
+
+    QVERIFY(result.value(QStringLiteral("valid")).toBool());
+    QVERIFY(result.value(QStringLiteral("ambiguous")).toBool());
+    const QVariantList instants = result.value(QStringLiteral("utcInstants")).toList();
+    QCOMPARE(instants, QVariantList({QStringLiteral("2024-10-27T00:30:00.000Z"),
+                                    QStringLiteral("2024-10-27T01:30:00.000Z")}));
+}
+
+void TimeMathTest::formatsUtcForLocal()
+{
+    TimeMath timeMath;
+    const QString utc = QStringLiteral("2024-01-15T18:05:00.000Z");
+
+    QCOMPARE(timeMath.formatUtcForLocal(utc, QStringLiteral("America/New_York"), true)
+                 .value(QStringLiteral("formatted")).toString(),
+             QStringLiteral("2024-01-15 13:05"));
+    QCOMPARE(timeMath.formatUtcForLocal(utc, QStringLiteral("America/New_York"), false)
+                 .value(QStringLiteral("formatted")).toString(),
+             QStringLiteral("2024-01-15 1:05 PM"));
 }
 
 void TimeMathTest::rejectsInvalidInput()

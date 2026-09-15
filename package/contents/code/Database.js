@@ -6,6 +6,8 @@
 const DATABASE_ID = "io.github.ownisticapps.worktodo"
 const POSITION_GAP = 1024
 const POSITION_OFFSET = 1000000000
+const TRASH_RETENTION_DAYS = 30
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
 const STATUSES = ["backlog", "ready", "in_progress", "blocked", "completed"]
 
 let databaseName = DATABASE_ID
@@ -39,10 +41,25 @@ function normalizedText(value, fieldName, maximumLength) {
         fail(fieldName + " must be text.")
     }
     const normalized = value.trim()
-    if (normalized.length === 0 || normalized.length > maximumLength) {
+    if (codePointLength(normalized) === 0 || codePointLength(normalized) > maximumLength) {
         fail(fieldName + " must contain between 1 and " + maximumLength + " characters.")
     }
     return normalized
+}
+
+function codePointLength(value) {
+    let count = 0
+    for (let index = 0; index < value.length; index += 1) {
+        const codeUnit = value.charCodeAt(index)
+        if (codeUnit >= 0xd800 && codeUnit <= 0xdbff && index + 1 < value.length) {
+            const nextCodeUnit = value.charCodeAt(index + 1)
+            if (nextCodeUnit >= 0xdc00 && nextCodeUnit <= 0xdfff) {
+                index += 1
+            }
+        }
+        count += 1
+    }
+    return count
 }
 
 function requireUtcInstant(value, fieldName) {
@@ -122,18 +139,10 @@ function initialize() {
         // does not enable foreign keys. Migration triggers enforce the same references.
         tx.executeSql("PRAGMA foreign_keys = ON")
         Migrations.apply(tx, nowUtc())
+        purgeExpiredTrashInTransaction(tx, nowUtc())
         const active = tx.executeSql("SELECT COUNT(*) AS count FROM work_sessions WHERE ended_at_utc IS NULL")
         if (active.rows.item(0).count > 1) {
             fail("The database contains more than one active work session.")
-        }
-        const overlaps = tx.executeSql(
-            "SELECT 1 FROM work_sessions AS first_session JOIN work_sessions AS second_session " +
-            "ON first_session.id < second_session.id " +
-            "AND first_session.started_at_utc < COALESCE(second_session.ended_at_utc, '9999-12-31T23:59:59.999Z') " +
-            "AND COALESCE(first_session.ended_at_utc, '9999-12-31T23:59:59.999Z') > second_session.started_at_utc LIMIT 1"
-        )
-        if (overlaps.rows.length > 0) {
-            fail("The database contains overlapping work sessions.")
         }
     })
     initialized = true
@@ -165,6 +174,36 @@ function categoryById(tx, categoryId) {
         fail("The category does not exist.")
     }
     return category
+}
+
+function activeCategoryById(tx, categoryId) {
+    const category = categoryById(tx, categoryId)
+    if (category.trashed_at_utc !== null) {
+        fail("The category is in the trash.")
+    }
+    return category
+}
+
+function trashExpiryCutoff(currentUtc) {
+    currentUtc = requireUtcInstant(currentUtc || nowUtc(), "Purge time")
+    return new Date(new Date(currentUtc).getTime() - TRASH_RETENTION_DAYS * MILLISECONDS_PER_DAY).toISOString()
+}
+
+function purgeExpiredTrashInTransaction(tx, currentUtc) {
+    const cutoffUtc = trashExpiryCutoff(currentUtc)
+    const expiredCategories = tx.executeSql(
+        "SELECT COUNT(*) AS count FROM categories WHERE trashed_at_utc IS NOT NULL AND trashed_at_utc <= ?",
+        [cutoffUtc]
+    )
+    if (expiredCategories.rows.item(0).count === 0) {
+        return 0
+    }
+    const categoryClause = "category_id IN (SELECT id FROM categories WHERE trashed_at_utc IS NOT NULL AND trashed_at_utc <= ?)"
+    tx.executeSql("DELETE FROM work_sessions WHERE task_id IN (SELECT id FROM tasks WHERE " + categoryClause + ")", [cutoffUtc])
+    tx.executeSql("DELETE FROM status_events WHERE task_id IN (SELECT id FROM tasks WHERE " + categoryClause + ")", [cutoffUtc])
+    tx.executeSql("DELETE FROM tasks WHERE " + categoryClause, [cutoffUtc])
+    tx.executeSql("DELETE FROM categories WHERE trashed_at_utc IS NOT NULL AND trashed_at_utc <= ?", [cutoffUtc])
+    return expiredCategories.rows.item(0).count
 }
 
 function taskById(tx, taskId) {
@@ -203,8 +242,16 @@ function closeSession(tx, session, endedAtUtc) {
         "UPDATE work_sessions SET ended_at_utc = ?, updated_at_utc = ? WHERE id = ?",
         [endedAtUtc, endedAtUtc, session.id]
     )
+    recalculateTrackedSeconds(tx, session.task_id)
     session.ended_at_utc = endedAtUtc
     return session
+}
+
+function recalculateTrackedSeconds(tx, taskId) {
+    tx.executeSql(
+        "UPDATE tasks SET tracked_seconds = COALESCE((SELECT SUM(strftime('%s', ended_at_utc) - strftime('%s', started_at_utc)) FROM work_sessions WHERE task_id = ? AND ended_at_utc IS NOT NULL), 0) WHERE id = ?",
+        [taskId, taskId]
+    )
 }
 
 function closeActiveSessionForTask(tx, taskId, endedAtUtc) {
@@ -299,7 +346,7 @@ function reconcileStatusHistory(tx, taskId) {
 
 function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
     const ordered = rows(tx.executeSql(
-        "SELECT id, position FROM categories WHERE id <> ? ORDER BY position, created_at_utc, id",
+        "SELECT id, position FROM categories WHERE trashed_at_utc IS NULL AND id <> ? ORDER BY position, created_at_utc, id",
         [categoryId]
     ))
     let index = ordered.length
@@ -316,9 +363,9 @@ function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
     let next = index < ordered.length ? ordered[index].position : null
     if ((previous !== null && next !== null && next - previous < 2)
         || (previous === null && next !== null && next < 2)) {
-        tx.executeSql("UPDATE categories SET position = position + ?", [POSITION_OFFSET])
+        tx.executeSql("UPDATE categories SET position = position + ? WHERE trashed_at_utc IS NULL", [POSITION_OFFSET])
         const categories = rows(tx.executeSql(
-            "SELECT id FROM categories ORDER BY position, created_at_utc, id"
+            "SELECT id FROM categories WHERE trashed_at_utc IS NULL ORDER BY position, created_at_utc, id"
         ))
         for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex += 1) {
             tx.executeSql("UPDATE categories SET position = ? WHERE id = ?", [(categoryIndex + 1) * POSITION_GAP, categories[categoryIndex].id])
@@ -338,8 +385,16 @@ function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
 }
 
 function listCategories() {
+    purgeExpiredTrash()
     return read(function(tx) {
-        return rows(tx.executeSql("SELECT * FROM categories ORDER BY position, created_at_utc, id"))
+        return rows(tx.executeSql("SELECT * FROM categories WHERE trashed_at_utc IS NULL ORDER BY position, created_at_utc, id"))
+    })
+}
+
+function listTrashedCategories() {
+    purgeExpiredTrash()
+    return read(function(tx) {
+        return rows(tx.executeSql("SELECT * FROM categories WHERE trashed_at_utc IS NOT NULL ORDER BY trashed_at_utc DESC, position, id"))
     })
 }
 
@@ -353,7 +408,7 @@ function createCategory(input) {
             id: newId(),
             name: name,
             color: color,
-            position: nextPosition(tx, "categories", "", []),
+            position: nextPosition(tx, "categories", "WHERE trashed_at_utc IS NULL", []),
             collapsed: input.collapsed ? 1 : 0,
             created_at_utc: timestamp,
             updated_at_utc: timestamp
@@ -370,7 +425,7 @@ function updateCategory(input) {
     input = input || {}
     const categoryId = requireId(input.id, "Category ID")
     return write(function(tx) {
-        const current = categoryById(tx, categoryId)
+        const current = activeCategoryById(tx, categoryId)
         const name = input.name === undefined ? current.name : normalizedText(input.name, "Category name", 100)
         const color = input.color === undefined ? current.color : normalizedText(input.color, "Category color", 32)
         const collapsed = input.collapsed === undefined ? current.collapsed : (input.collapsed ? 1 : 0)
@@ -389,7 +444,10 @@ function moveCategory(input) {
     const targetCategoryId = input.targetCategoryId || null
     const placement = input.placement === "after" ? "after" : "before"
     return write(function(tx) {
-        categoryById(tx, categoryId)
+        activeCategoryById(tx, categoryId)
+        if (targetCategoryId) {
+            activeCategoryById(tx, targetCategoryId)
+        }
         const position = positionForCategoryMove(tx, categoryId, targetCategoryId, placement)
         tx.executeSql("UPDATE categories SET position = ?, updated_at_utc = ? WHERE id = ?", [position, nowUtc(), categoryId])
         return position
@@ -399,24 +457,60 @@ function moveCategory(input) {
 function deleteCategory(categoryId) {
     categoryId = requireId(categoryId, "Category ID")
     return write(function(tx) {
-        categoryById(tx, categoryId)
-        const tasks = tx.executeSql("SELECT COUNT(*) AS count FROM tasks WHERE category_id = ?", [categoryId])
-        if (tasks.rows.item(0).count > 0) {
-            fail("Move, archive, or delete all tasks before deleting this category.")
+        activeCategoryById(tx, categoryId)
+        const timestamp = nowUtc()
+        tx.executeSql(
+            "UPDATE work_sessions SET ended_at_utc = CASE WHEN started_at_utc > ? THEN started_at_utc ELSE ? END, updated_at_utc = ? " +
+            "WHERE ended_at_utc IS NULL AND task_id IN (SELECT id FROM tasks WHERE category_id = ?)",
+            [timestamp, timestamp, timestamp, categoryId]
+        )
+        tx.executeSql(
+            "UPDATE tasks SET tracked_seconds = COALESCE((SELECT SUM(strftime('%s', ended_at_utc) - strftime('%s', started_at_utc)) FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NOT NULL), 0) WHERE category_id = ?",
+            [categoryId]
+        )
+        tx.executeSql(
+            "UPDATE categories SET trashed_at_utc = ?, updated_at_utc = ? WHERE id = ?",
+            [timestamp, timestamp, categoryId]
+        )
+    })
+}
+
+function restoreCategory(categoryId) {
+    categoryId = requireId(categoryId, "Category ID")
+    return write(function(tx) {
+        const category = categoryById(tx, categoryId)
+        if (category.trashed_at_utc === null) {
+            return category
         }
-        tx.executeSql("DELETE FROM categories WHERE id = ?", [categoryId])
+        const timestamp = nowUtc()
+        const position = nextPosition(tx, "categories", "WHERE trashed_at_utc IS NULL", [])
+        tx.executeSql(
+            "UPDATE categories SET trashed_at_utc = NULL, position = ?, updated_at_utc = ? WHERE id = ?",
+            [position, timestamp, categoryId]
+        )
+        category.trashed_at_utc = null
+        category.position = position
+        category.updated_at_utc = timestamp
+        return category
+    })
+}
+
+function purgeExpiredTrash(currentUtc) {
+    return write(function(tx) {
+        return purgeExpiredTrashInTransaction(tx, currentUtc || nowUtc())
     })
 }
 
 function listTasks(filter) {
     filter = filter || {}
+    purgeExpiredTrash()
     const statuses = filter.statuses || []
     const showArchived = filter.showArchived === true
     for (let index = 0; index < statuses.length; index += 1) {
         requireStatus(statuses[index])
     }
     return read(function(tx) {
-        const clauses = [showArchived ? "1 = 1" : "tasks.archived_at_utc IS NULL"]
+        const clauses = ["categories.trashed_at_utc IS NULL", showArchived ? "1 = 1" : "tasks.archived_at_utc IS NULL"]
         const parameters = []
         if (statuses.length > 0) {
             clauses.push("tasks.status IN (" + statuses.map(function() { return "?" }).join(", ") + ")")
@@ -428,10 +522,11 @@ function listTasks(filter) {
             "SELECT tasks.id AS taskId, tasks.category_id AS categoryId, categories.name AS categoryName, " +
             "categories.color AS categoryColor, categories.collapsed AS categoryCollapsed, tasks.title, tasks.details, " +
             "tasks.status, tasks.position, tasks.archived_at_utc AS archivedAtUtc, " +
-            "COALESCE((SELECT SUM(strftime('%s', ended_at_utc) - strftime('%s', started_at_utc)) " +
-            "FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NOT NULL), 0) AS trackedSeconds, " +
-            "(SELECT started_at_utc FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NULL) AS activeStartedAt " +
-            "FROM tasks JOIN categories ON categories.id = tasks.category_id WHERE " + clauses.join(" AND ") +
+            "tasks.tracked_seconds AS trackedSeconds, " +
+            "active_session.started_at_utc AS activeStartedAt " +
+            "FROM tasks JOIN categories ON categories.id = tasks.category_id " +
+            "LEFT JOIN work_sessions AS active_session ON active_session.task_id = tasks.id AND active_session.ended_at_utc IS NULL " +
+            "WHERE " + clauses.join(" AND ") +
             " ORDER BY categories.position, tasks.position, tasks.created_at_utc, tasks.id",
             parameters
         ))
@@ -443,8 +538,7 @@ function getTask(taskId) {
     return read(function(tx) {
         const task = first(tx.executeSql(
             "SELECT tasks.*, categories.name AS category_name, categories.color AS category_color, " +
-            "COALESCE((SELECT SUM(strftime('%s', ended_at_utc) - strftime('%s', started_at_utc)) " +
-            "FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NOT NULL), 0) AS trackedSeconds, " +
+            "tasks.tracked_seconds AS trackedSeconds, " +
             "(SELECT started_at_utc FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NULL) AS activeStartedAt " +
             "FROM tasks " +
             "JOIN categories ON categories.id = tasks.category_id WHERE tasks.id = ?",
@@ -464,12 +558,12 @@ function createTask(input) {
     const categoryId = requireId(input.categoryId, "Category ID")
     const title = normalizedText(input.title, "Task title", 200)
     const details = typeof input.details === "string" ? input.details : ""
-    if (details.length > 20000) {
+    if (codePointLength(details) > 20000) {
         fail("Task details must contain no more than 20,000 characters.")
     }
     const status = requireStatus(input.status || "backlog")
     return write(function(tx) {
-        categoryById(tx, categoryId)
+        activeCategoryById(tx, categoryId)
         const timestamp = nowUtc()
         const task = {
             id: newId(), categoryId: categoryId, title: title, details: details, status: status,
@@ -499,7 +593,7 @@ function updateTask(input) {
         const task = taskById(tx, taskId)
         const title = input.title === undefined ? task.title : normalizedText(input.title, "Task title", 200)
         const details = input.details === undefined ? task.details : input.details
-        if (typeof details !== "string" || details.length > 20000) {
+        if (typeof details !== "string" || codePointLength(details) > 20000) {
             fail("Task details must contain no more than 20,000 characters.")
         }
         tx.executeSql("UPDATE tasks SET title = ?, details = ?, updated_at_utc = ? WHERE id = ?", [title, details, nowUtc(), taskId])
@@ -514,12 +608,13 @@ function saveTask(input) {
     const details = typeof input.details === "string" ? input.details : ""
     const categoryId = requireId(input.categoryId, "Category ID")
     const status = requireStatus(input.status)
-    if (details.length > 20000) {
+    if (codePointLength(details) > 20000) {
         fail("Task details must contain no more than 20,000 characters.")
     }
     return write(function(tx) {
         const task = taskById(tx, taskId)
-        categoryById(tx, categoryId)
+        activeCategoryById(tx, task.category_id)
+        activeCategoryById(tx, categoryId)
         const timestamp = nowUtc()
         let position = task.position
         if (task.category_id !== categoryId) {
@@ -552,7 +647,8 @@ function moveTask(input) {
     const placement = input.placement === "after" ? "after" : "before"
     return write(function(tx) {
         const task = taskById(tx, taskId)
-        categoryById(tx, targetCategoryId)
+        activeCategoryById(tx, task.category_id)
+        activeCategoryById(tx, targetCategoryId)
         if (targetTaskId === taskId) {
             return task.position
         }
@@ -701,6 +797,7 @@ function createWorkSession(input) {
             "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
             [session.id, session.taskId, session.startedAtUtc, session.endedAtUtc, session.timezoneId, session.note, session.createdAtUtc, session.updatedAtUtc]
         )
+        recalculateTrackedSeconds(tx, taskId)
         return session
     })
 }
@@ -720,7 +817,7 @@ function updateWorkSession(input) {
         }
         const timezoneId = input.timezoneId === undefined ? session.timezone_id : requireTimezoneId(input.timezoneId)
         const note = input.note === undefined ? session.note : input.note
-        if (typeof note !== "string" || note.length > 20000) {
+        if (typeof note !== "string" || codePointLength(note) > 20000) {
             fail("Work-session notes must contain no more than 20,000 characters.")
         }
         if (hasSessionOverlap(tx, startedAtUtc, endedAtUtc, sessionId)) {
@@ -730,13 +827,18 @@ function updateWorkSession(input) {
             "UPDATE work_sessions SET started_at_utc = ?, ended_at_utc = ?, timezone_id = ?, note = ?, manually_edited = 1, updated_at_utc = ? WHERE id = ?",
             [startedAtUtc, endedAtUtc, timezoneId, note, nowUtc(), sessionId]
         )
+        recalculateTrackedSeconds(tx, session.task_id)
     })
 }
 
 function deleteWorkSession(sessionId) {
     sessionId = requireId(sessionId, "Work session ID")
     return write(function(tx) {
+        const session = first(tx.executeSql("SELECT task_id FROM work_sessions WHERE id = ?", [sessionId]))
         tx.executeSql("DELETE FROM work_sessions WHERE id = ?", [sessionId])
+        if (session) {
+            recalculateTrackedSeconds(tx, session.task_id)
+        }
     })
 }
 
@@ -744,6 +846,7 @@ function listReportSessions(periodStartUtc, periodEndUtc, currentUtc) {
     periodStartUtc = requireUtcInstant(periodStartUtc, "Report start")
     periodEndUtc = requireUtcInstant(periodEndUtc, "Report end")
     const activeEndUtc = requireUtcInstant(currentUtc || nowUtc(), "Report end")
+    purgeExpiredTrash()
     return read(function(tx) {
         return rows(tx.executeSql(
             "SELECT work_sessions.id AS sessionId, work_sessions.task_id AS taskId, tasks.title AS taskTitle, " +

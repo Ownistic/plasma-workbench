@@ -126,10 +126,8 @@ kpackagetool6 --type=Plasma/Applet --upgrade package
 Remove the installed package:
 
 ```bash
-kpackagetool6 --type=Plasma/Applet --remove io.github.christianespinoza.worktodo
+kpackagetool6 --type=Plasma/Applet --remove io.github.ownisticapps.worktodo
 ```
-
-Replace the example identifier if the project chooses another identifier.
 
 After installation, open Plasma’s **Add Widgets** interface and add **Work Todo** to the desktop.
 
@@ -219,12 +217,16 @@ Reference: [Qt QML tooling and `qmllint`](https://doc.qt.io/qt-6/qtqml-tooling-q
 
 ## 9. Package a release
 
-Create a ZIP-compatible archive whose root contains `metadata.json` and `contents/`. Use the `.plasmoid` extension for the release artifact.
-
-Example from inside `package/`:
+Create a ZIP-compatible archive whose root contains `metadata.json` and `contents/`. Use the `.plasmoid` extension for the release artifact. The CMake target packages the already-built self-contained `package/` and avoids an external ZIP dependency:
 
 ```bash
-zip -r ../work-todo-0.1.0.plasmoid metadata.json contents
+cmake --build build --target package-plasmoid
+```
+
+The archive is written to `build/work-todo-0.1.0.plasmoid`. CMake creates it with a fixed `SOURCE_DATE_EPOCH`, so equivalent package contents produce a reproducible archive. When `kpackagetool6` was found during configuration, verify archive installation in an isolated package root:
+
+```bash
+ctest --test-dir build -R plasmoid-archive-install --output-on-failure
 ```
 
 Before packaging:

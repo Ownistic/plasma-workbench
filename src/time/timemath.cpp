@@ -25,6 +25,26 @@ QVariantMap rangeResult(const QDateTime &start, const QDateTime &end, const QTim
     };
 }
 
+QVariantMap localPartsResult(const QDateTime &dateTime, const QTimeZone &timeZone)
+{
+    const QDateTime local = dateTime.toTimeZone(timeZone);
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("utc"), dateTime.toUTC().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("date"), local.date().toString(Qt::ISODate)},
+        {QStringLiteral("time"), local.time().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("year"), local.date().year()},
+        {QStringLiteral("month"), local.date().month()},
+        {QStringLiteral("day"), local.date().day()},
+        {QStringLiteral("hour"), local.time().hour()},
+        {QStringLiteral("minute"), local.time().minute()},
+        {QStringLiteral("second"), local.time().second()},
+        {QStringLiteral("millisecond"), local.time().msec()},
+        {QStringLiteral("offsetSeconds"), local.offsetFromUtc()},
+        {QStringLiteral("timeZoneAbbreviation"), local.timeZoneAbbreviation()},
+    };
+}
+
 bool timeZoneForId(const QString &timeZoneId, QTimeZone *timeZone)
 {
     const QByteArray id = timeZoneId.toUtf8();
@@ -81,6 +101,80 @@ QString TimeMath::localDateForUtc(const QString &utc, const QString &timeZoneId)
         return {};
     }
     return dateTime.toTimeZone(timeZone).date().toString(Qt::ISODate);
+}
+
+QVariantMap TimeMath::localPartsForUtc(const QString &utc, const QString &timeZoneId) const
+{
+    QTimeZone timeZone;
+    QDateTime dateTime;
+    if (!timeZoneForId(timeZoneId, &timeZone)) {
+        return invalidResult(QStringLiteral("The time zone ID is invalid."));
+    }
+    if (!utcDateTime(utc, &dateTime)) {
+        return invalidResult(QStringLiteral("The UTC instant is invalid."));
+    }
+    return localPartsResult(dateTime, timeZone);
+}
+
+QVariantMap TimeMath::possibleUtcInstantsForLocal(int year, int month, int day,
+                                                   int hour, int minute, int second,
+                                                   int millisecond,
+                                                   const QString &timeZoneId) const
+{
+    const QDate date(year, month, day);
+    const QTime time(hour, minute, second, millisecond);
+    if (!date.isValid() || !time.isValid()) {
+        return invalidResult(QStringLiteral("The local date and time is invalid."));
+    }
+
+    QTimeZone timeZone;
+    if (!timeZoneForId(timeZoneId, &timeZone)) {
+        return invalidResult(QStringLiteral("The time zone ID is invalid."));
+    }
+
+    const QDateTime before(date, time, timeZone, QDateTime::TransitionResolution::RelativeToBefore);
+    const QDateTime after(date, time, timeZone, QDateTime::TransitionResolution::RelativeToAfter);
+    QVariantList utcInstants;
+    for (const QDateTime &candidate : {before, after}) {
+        const QDateTime utc = candidate.toUTC();
+        if (candidate.isValid() && utc.toTimeZone(timeZone).date() == date
+            && utc.toTimeZone(timeZone).time() == time
+            && !utcInstants.contains(utc.toString(Qt::ISODateWithMs))) {
+            utcInstants.append(utc.toString(Qt::ISODateWithMs));
+        }
+    }
+
+    if (utcInstants.isEmpty()) {
+        return invalidResult(QStringLiteral("The local date and time does not exist in this time zone."));
+    }
+    std::sort(utcInstants.begin(), utcInstants.end(), [](const QVariant &left, const QVariant &right) {
+        return left.toString() < right.toString();
+    });
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("ambiguous"), utcInstants.size() > 1},
+        {QStringLiteral("utcInstants"), utcInstants},
+    };
+}
+
+QVariantMap TimeMath::formatUtcForLocal(const QString &utc, const QString &timeZoneId,
+                                        bool use24Hour) const
+{
+    const QVariantMap parts = localPartsForUtc(utc, timeZoneId);
+    if (!parts.value(QStringLiteral("valid")).toBool()) {
+        return parts;
+    }
+
+    QDateTime dateTime;
+    utcDateTime(utc, &dateTime);
+    QTimeZone timeZone(timeZoneId.toUtf8());
+    const QDateTime local = dateTime.toTimeZone(timeZone);
+    return {
+        {QStringLiteral("valid"), true},
+        {QStringLiteral("formatted"), local.toString(use24Hour
+            ? QStringLiteral("yyyy-MM-dd HH:mm")
+            : QStringLiteral("yyyy-MM-dd h:mm AP"))},
+    };
 }
 
 QVariantMap TimeMath::weekRange(int year, int month, int day, const QString &timeZoneId,
