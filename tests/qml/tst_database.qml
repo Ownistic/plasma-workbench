@@ -134,6 +134,90 @@ TestCase {
         compare(allTasks[2].categoryId, operations.id)
     }
 
+    function test_moveTaskCanPlaceAfterLastTaskInCategory() {
+        const category = createCategory("Product")
+        const first = createTask(category.id, "First")
+        const middle = createTask(category.id, "Middle")
+        const last = createTask(category.id, "Last")
+
+        Database.moveTask({
+            taskId: first.id,
+            targetTaskId: last.id,
+            targetCategoryId: category.id,
+            placement: "after"
+        })
+
+        const tasks = Database.listTasks({})
+        compare(tasks.length, 3)
+        compare(tasks[0].taskId, middle.id)
+        compare(tasks[1].taskId, last.id)
+        compare(tasks[2].taskId, first.id)
+    }
+
+    function test_moveTaskCanPlaceTaskAtEndOfAnotherCategory() {
+        const source = createCategory("Source")
+        const destination = createCategory("Destination")
+        const sourceTask = createTask(source.id, "Source task")
+        const destinationFirst = createTask(destination.id, "Destination first")
+        const destinationLast = createTask(destination.id, "Destination last")
+
+        Database.moveTask({
+            taskId: sourceTask.id,
+            targetTaskId: destinationLast.id,
+            targetCategoryId: destination.id,
+            placement: "after"
+        })
+
+        const tasks = Database.listTasks({})
+        compare(tasks.length, 3)
+        compare(tasks[0].taskId, destinationFirst.id)
+        compare(tasks[1].taskId, destinationLast.id)
+        compare(tasks[2].taskId, sourceTask.id)
+        compare(tasks[2].categoryId, destination.id)
+    }
+
+    function test_moveCategoryCanPlaceAfterLastActiveCategory() {
+        const first = createCategory("First")
+        const middle = createCategory("Middle")
+        const last = createCategory("Last")
+
+        Database.moveCategory({
+            categoryId: first.id,
+            targetCategoryId: last.id,
+            placement: "after"
+        })
+
+        const categories = Database.listCategories()
+        compare(categories.length, 3)
+        compare(categories[0].id, middle.id)
+        compare(categories[1].id, last.id)
+        compare(categories[2].id, first.id)
+    }
+
+    function test_rejectedTaskMoveKeepsPersistedListOrder() {
+        const source = createCategory("Source")
+        const destination = createCategory("Destination")
+        const sourceTask = createTask(source.id, "Source task")
+        const destinationFirst = createTask(destination.id, "Destination first")
+        const destinationMoving = createTask(destination.id, "Destination moving")
+
+        assertThrows(function() {
+            Database.moveTask({
+                taskId: destinationMoving.id,
+                targetTaskId: sourceTask.id,
+                targetCategoryId: destination.id,
+                placement: "before"
+            })
+        }, "destination task does not exist")
+
+        Database.initialize()
+        const tasks = Database.listTasks({})
+        compare(tasks.length, 3)
+        compare(tasks[0].taskId, sourceTask.id)
+        compare(tasks[1].taskId, destinationFirst.id)
+        compare(tasks[2].taskId, destinationMoving.id)
+    }
+
     function test_manualSessionsRejectGlobalOverlap() {
         const category = createCategory("Product")
         const first = createTask(category.id, "First")

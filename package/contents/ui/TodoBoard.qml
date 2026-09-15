@@ -16,6 +16,22 @@ Item {
     property var selectedStatuses: []
     property alias categories: categoryModel
     property string currentPage: "board"
+    property string moveError: ""
+    property string draggedTaskId: ""
+    property string draggedCategoryId: ""
+    property string draggedTaskTargetId: ""
+    property string draggedTaskTargetCategoryId: ""
+    property string draggedTaskPlacement: "before"
+    property var draggedTaskItem: null
+    property var draggedTaskData: null
+    property var draggedTaskPreviewItem: null
+    property string draggedCategoryTargetId: ""
+    property string draggedCategoryPlacement: "before"
+    property var draggedCategoryItem: null
+    property var draggedCategoryData: null
+    property var draggedCategoryPreviewItem: null
+    property bool taskDropHandled: false
+    property bool categoryDropHandled: false
     readonly property var activeSession: root.plasmoidRoot.activeSession
     readonly property bool hasActiveSession: root.plasmoidRoot.hasActiveSession
     readonly property string activeElapsedText: root.plasmoidRoot.activeElapsedText
@@ -36,6 +52,12 @@ Item {
         repeat: true
         running: true
         onTriggered: root.reload()
+    }
+
+    Timer {
+        id: moveErrorTimer
+        interval: 5000
+        onTriggered: root.moveError = ""
     }
 
     function formatSeconds(seconds) {
@@ -117,26 +139,162 @@ Item {
         return null
     }
 
+    function isVisibleCategory(categoryId) {
+        for (let index = 0; index < visibleCategoryModel.count; index += 1) {
+            if (visibleCategoryModel.get(index).id === categoryId) {
+                return true
+            }
+        }
+        return false
+    }
+
     function moveTask(task, targetTask, placement) {
         if (!targetTask) {
             return
         }
-        Database.moveTask({
-            taskId: task.taskId,
-            targetCategoryId: targetTask.categoryId,
-            targetTaskId: targetTask.taskId,
-            placement: placement
-        })
-        root.reload()
+        try {
+            Database.moveTask({
+                taskId: task.taskId,
+                targetCategoryId: targetTask.categoryId,
+                targetTaskId: targetTask.taskId,
+                placement: placement
+            })
+            root.moveError = ""
+        } catch (error) {
+            root.moveError = error.message
+            moveErrorTimer.restart()
+        } finally {
+            root.reload()
+        }
     }
 
     function moveTaskById(taskId, targetTaskId, targetCategoryId, placement) {
-        Database.moveTask({
-            taskId: taskId,
-            targetCategoryId: targetCategoryId,
-            targetTaskId: targetTaskId || null,
-            placement: placement || "before"
-        })
+        try {
+            Database.moveTask({
+                taskId: taskId,
+                targetCategoryId: targetCategoryId,
+                targetTaskId: targetTaskId || null,
+                placement: placement || "before"
+            })
+            root.moveError = ""
+        } catch (error) {
+            root.moveError = error.message
+            moveErrorTimer.restart()
+        } finally {
+            root.reload()
+        }
+    }
+
+    function moveCategory(categoryId, targetCategoryId, placement) {
+        try {
+            Database.moveCategory({
+                categoryId: categoryId,
+                targetCategoryId: targetCategoryId,
+                placement: placement
+            })
+            root.moveError = ""
+        } catch (error) {
+            root.moveError = error.message
+            moveErrorTimer.restart()
+        } finally {
+            root.reload()
+        }
+    }
+
+    function beginTaskDrag(task, dragItem) {
+        root.draggedTaskId = task.taskId
+        root.draggedTaskItem = dragItem
+        root.draggedTaskData = task
+        root.taskDropHandled = false
+        root.draggedTaskTargetId = ""
+        root.draggedTaskTargetCategoryId = task.categoryId
+        root.draggedTaskPlacement = "before"
+        root.draggedTaskPreviewItem = null
+        root.moveError = ""
+    }
+
+    function previewTaskMove(sourceTaskId, targetTaskId, targetCategoryId, placement, previewItem) {
+        if (sourceTaskId !== root.draggedTaskId || sourceTaskId === targetTaskId) {
+            return
+        }
+        root.draggedTaskTargetId = targetTaskId || ""
+        root.draggedTaskTargetCategoryId = targetCategoryId
+        root.draggedTaskPlacement = placement
+        root.draggedTaskPreviewItem = previewItem || null
+    }
+
+    function commitTaskDrop(sourceTaskId, targetTaskId, targetCategoryId, placement) {
+        root.taskDropHandled = true
+        try {
+            Database.moveTask({
+                taskId: sourceTaskId,
+                targetCategoryId: targetCategoryId,
+                targetTaskId: targetTaskId || null,
+                placement: placement
+            })
+            root.moveError = ""
+        } catch (error) {
+            root.moveError = error.message
+            moveErrorTimer.restart()
+        }
+    }
+
+    function finishTaskDrag() {
+        root.draggedTaskId = ""
+        root.draggedTaskTargetId = ""
+        root.draggedTaskTargetCategoryId = ""
+        root.draggedTaskItem = null
+        root.draggedTaskData = null
+        root.draggedTaskPreviewItem = null
+        root.taskDropHandled = false
+        root.reload()
+    }
+
+    function beginCategoryDrag(category, dragItem) {
+        root.draggedCategoryId = category.id
+        root.draggedCategoryItem = dragItem
+        root.draggedCategoryData = category
+        root.categoryDropHandled = false
+        root.draggedCategoryTargetId = ""
+        root.draggedCategoryPlacement = "before"
+        root.draggedCategoryPreviewItem = null
+        root.moveError = ""
+    }
+
+    function previewCategoryMove(sourceCategoryId, targetCategoryId, placement, previewItem) {
+        if (sourceCategoryId !== root.draggedCategoryId) {
+            return
+        }
+        if (sourceCategoryId === targetCategoryId) {
+            return
+        }
+        root.draggedCategoryTargetId = targetCategoryId || ""
+        root.draggedCategoryPlacement = placement
+        root.draggedCategoryPreviewItem = previewItem || null
+    }
+
+    function commitCategoryDrop(sourceCategoryId, targetCategoryId, placement) {
+        root.categoryDropHandled = true
+        try {
+            Database.moveCategory({
+                categoryId: sourceCategoryId,
+                targetCategoryId: targetCategoryId || null,
+                placement: placement
+            })
+            root.moveError = ""
+        } catch (error) {
+            root.moveError = error.message
+            moveErrorTimer.restart()
+        }
+    }
+
+    function finishCategoryDrag() {
+        root.draggedCategoryId = ""
+        root.draggedCategoryTargetId = ""
+        root.draggedCategoryItem = null
+        root.draggedCategoryData = null
+        root.draggedCategoryPreviewItem = null
+        root.categoryDropHandled = false
         root.reload()
     }
 
@@ -252,6 +410,15 @@ Item {
             }
         }
 
+        PlasmaComponents.Label {
+            Layout.fillWidth: true
+            visible: root.moveError.length > 0
+            text: root.moveError
+            color: Kirigami.Theme.negativeTextColor
+            wrapMode: Text.Wrap
+            Accessible.name: text
+        }
+
         PlasmaExtras.PlaceholderMessage {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -292,55 +459,306 @@ Item {
                         width: categoryColumn.width
                         spacing: Kirigami.Units.smallSpacing
 
-                        CategoryHeader {
+                        Item {
+                            id: categoryHeaderSlot
                             width: parent.width
-                            categoryId: model.id
-                            categoryName: model.name
-                            categoryColor: model.color
-                            collapsed: model.collapsed !== 0
-                            onCollapseRequested: {
-                                Database.updateCategory({ id: model.id, collapsed: model.collapsed === 0 })
-                                root.reload()
+                            readonly property bool insertionTarget: root.draggedCategoryPreviewItem === categoryHeaderSlot
+                            readonly property real placeholderHeight: insertionTarget
+                                ? (root.draggedCategoryItem ? root.draggedCategoryItem.implicitHeight : categoryHeader.implicitHeight) : 0
+                            height: categoryHeader.dragging ? 0 : categoryHeader.implicitHeight + placeholderHeight
+
+                            Rectangle {
+                                width: parent.width
+                                height: categoryHeaderSlot.placeholderHeight
+                                y: root.draggedCategoryPlacement === "before" ? 0 : categoryHeader.implicitHeight
+                                visible: categoryHeaderSlot.insertionTarget
+                                color: Kirigami.Theme.alternateBackgroundColor
+                                opacity: 0.45
+                                radius: Kirigami.Units.smallSpacing
+
+                                PlasmaComponents.Label {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: Kirigami.Units.largeSpacing
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: model.name
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
                             }
-                            onEditRequested: categoryEditorDialog.openForCategory(model)
-                            onDeleteRequested: categoryDeleteDialog.openForCategory(model)
-                            onTaskDropped: function(taskId) {
-                                root.moveTaskById(taskId, null, model.id, "before")
+
+                            DropArea {
+                                width: parent.width
+                                height: categoryHeaderSlot.placeholderHeight
+                                y: root.draggedCategoryPlacement === "before" ? 0 : categoryHeader.implicitHeight
+                                visible: categoryHeaderSlot.insertionTarget
+                                z: 3
+                                keys: ["application/x-worktodo-category"]
+                                onEntered: function(drag) {
+                                    if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
+                                        root.previewCategoryMove(drag.source.categoryId, model.id, root.draggedCategoryPlacement, categoryHeaderSlot)
+                                    }
+                                }
+                                onDropped: function(drop) {
+                                    if (drop.source && drop.source.categoryId && drop.source.categoryId !== model.id) {
+                                        root.commitCategoryDrop(drop.source.categoryId, model.id, root.draggedCategoryPlacement)
+                                        drop.acceptProposedAction()
+                                    }
+                                }
                             }
-                            onCategoryDropped: function(categoryId) {
-                                Database.moveCategory({
-                                    categoryId: categoryId,
-                                    targetCategoryId: model.id,
-                                    placement: "before"
-                                })
-                                root.reload()
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                height: 2
+                                y: root.draggedCategoryPlacement === "after" ? parent.height - height : 0
+                                visible: root.draggedCategoryTargetId === model.id
+                                color: Kirigami.Theme.highlightColor
+                            }
+
+                            CategoryHeader {
+                                id: categoryHeader
+                                width: parent.width
+                                y: categoryHeaderSlot.insertionTarget && root.draggedCategoryPlacement === "before"
+                                    ? categoryHeaderSlot.placeholderHeight : 0
+                                z: dragging ? 2 : 1
+                                categoryId: model.id
+                                categoryName: model.name
+                                categoryColor: model.color
+                                collapsed: model.collapsed !== 0
+                                onCollapseRequested: {
+                                    Database.updateCategory({ id: model.id, collapsed: model.collapsed === 0 })
+                                    root.reload()
+                                }
+                                onEditRequested: categoryEditorDialog.openForCategory(model)
+                                onDeleteRequested: categoryDeleteDialog.openForCategory(model)
+                                onDragStarted: function(dragItem) {
+                                    root.beginCategoryDrag(model, dragItem)
+                                }
+                                onDragPreviewRequested: function(sourceCategoryId, placement, targetItem) {
+                                    root.previewCategoryMove(sourceCategoryId, model.id, placement, targetItem)
+                                }
+                                onDragFinished: root.finishCategoryDrag()
+                                onTaskPreviewRequested: function(taskId, targetItem) {
+                                    root.previewTaskMove(taskId, null, model.id, "after", targetItem)
+                                }
+                                onTaskDropped: function(taskId) {
+                                    root.commitTaskDrop(taskId, null, model.id, "after")
+                                }
+                                onCategoryDropped: function(categoryId, placement) {
+                                    root.commitCategoryDrop(categoryId, model.id, placement)
+                                }
                             }
                         }
 
                         Repeater {
                             model: taskModel
 
-                            delegate: TaskCard {
+                            delegate: Item {
+                                id: taskSlot
                                 required property var model
                                 width: parent.width
-                                visible: model.categoryId === currentCategoryId && model.categoryCollapsed === 0
-                                height: visible ? implicitHeight : 0
-                                task: model
-                                active: root.activeSession && root.activeSession.task_id === model.taskId
-                                elapsedText: root.taskElapsedText(model)
-                                canMoveUp: root.adjacentTask(model, -1) !== null
-                                canMoveDown: root.adjacentTask(model, 1) !== null
-                                onTimerRequested: root.toggleTimer(model)
-                                onOpenRequested: root.openTask(model.taskId)
-                                onMoveUpRequested: root.moveTask(model, root.adjacentTask(model, -1), "before")
-                                onMoveDownRequested: root.moveTask(model, root.adjacentTask(model, 1), "after")
-                                onMoveToCategoryRequested: moveTaskDialog.openForTask(model)
-                                onDropRequested: function(sourceTaskId) {
-                                    root.moveTaskById(sourceTaskId, model.taskId, model.categoryId, "before")
+                                readonly property bool shown: model.categoryId === currentCategoryId && model.categoryCollapsed === 0
+                                readonly property bool insertionTarget: root.draggedTaskPreviewItem === taskSlot
+                                readonly property real placeholderHeight: insertionTarget
+                                    ? (root.draggedTaskItem ? root.draggedTaskItem.implicitHeight : taskCard.implicitHeight) : 0
+                                height: shown && !taskCard.dragging ? taskCard.implicitHeight + placeholderHeight : 0
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: taskSlot.placeholderHeight
+                                    y: root.draggedTaskPlacement === "before" ? 0 : taskCard.implicitHeight
+                                    visible: taskSlot.insertionTarget
+                                    color: Kirigami.Theme.alternateBackgroundColor
+                                    opacity: 0.45
+                                    radius: Kirigami.Units.smallSpacing
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: Kirigami.Units.largeSpacing
+                                        anchors.rightMargin: Kirigami.Units.largeSpacing
+
+                                        Rectangle {
+                                            Layout.fillHeight: true
+                                            Layout.preferredWidth: Kirigami.Units.smallSpacing
+                                            color: model.categoryColor
+                                            radius: width / 2
+                                        }
+
+                                        PlasmaComponents.Label {
+                                            Layout.fillWidth: true
+                                            text: model.title
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+
+                                DropArea {
+                                    width: parent.width
+                                    height: taskSlot.placeholderHeight
+                                    y: root.draggedTaskPlacement === "before" ? 0 : taskCard.implicitHeight
+                                    visible: taskSlot.insertionTarget
+                                    z: 3
+                                    keys: ["application/x-worktodo-task"]
+                                    onEntered: function(drag) {
+                                        if (drag.source && drag.source.task && drag.source.task.taskId !== model.taskId) {
+                                            root.previewTaskMove(drag.source.task.taskId, model.taskId, model.categoryId, root.draggedTaskPlacement, taskSlot)
+                                        }
+                                    }
+                                    onDropped: function(drop) {
+                                        if (drop.source && drop.source.task && drop.source.task.taskId !== model.taskId) {
+                                            root.commitTaskDrop(drop.source.task.taskId, model.taskId, model.categoryId, root.draggedTaskPlacement)
+                                            drop.acceptProposedAction()
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 2
+                                    y: root.draggedTaskPlacement === "after" ? parent.height - height : 0
+                                    visible: root.draggedTaskTargetId === model.taskId
+                                    color: Kirigami.Theme.highlightColor
+                                }
+
+                                TaskCard {
+                                    id: taskCard
+                                    width: parent.width
+                                    visible: taskSlot.shown || dragging
+                                    y: taskSlot.insertionTarget && root.draggedTaskPlacement === "before"
+                                        ? taskSlot.placeholderHeight : 0
+                                    z: dragging ? 2 : 1
+                                    opacity: dragging ? 0 : 1
+                                    task: model
+                                    active: root.activeSession && root.activeSession.task_id === model.taskId
+                                    elapsedText: root.taskElapsedText(model)
+                                    canMoveUp: root.adjacentTask(model, -1) !== null
+                                    canMoveDown: root.adjacentTask(model, 1) !== null
+                                    onTimerRequested: root.toggleTimer(model)
+                                    onOpenRequested: root.openTask(model.taskId)
+                                    onMoveUpRequested: root.moveTask(model, root.adjacentTask(model, -1), "before")
+                                    onMoveDownRequested: root.moveTask(model, root.adjacentTask(model, 1), "after")
+                                    onMoveToCategoryRequested: moveTaskDialog.openForTask(model)
+                                    onDragStarted: function(dragItem) {
+                                        root.beginTaskDrag(model, dragItem)
+                                    }
+                                    onDragPreviewRequested: function(sourceTaskId, placement, targetItem) {
+                                        root.previewTaskMove(sourceTaskId, model.taskId, model.categoryId, placement, targetItem)
+                                    }
+                                    onDragFinished: root.finishTaskDrag()
+                                    onDropRequested: function(sourceTaskId, placement) {
+                                        root.commitTaskDrop(sourceTaskId, model.taskId, model.categoryId, placement)
+                                    }
                                 }
                             }
                         }
+
                     }
+                }
+
+                Repeater {
+                    model: categoryModel
+
+                    delegate: DropArea {
+                        id: hiddenCategoryDrop
+                        required property var model
+                        readonly property bool hiddenDestination: !root.isVisibleCategory(model.id)
+                        width: parent.width
+                        height: hiddenDestination && (root.draggedTaskId.length > 0 || root.draggedCategoryId.length > 0)
+                            ? (root.draggedTaskItem ? root.draggedTaskItem.implicitHeight
+                                : (root.draggedCategoryItem ? root.draggedCategoryItem.implicitHeight : Kirigami.Units.gridUnit * 2)) : 0
+                        keys: ["application/x-worktodo-task", "application/x-worktodo-category"]
+                        onEntered: function(drag) {
+                            if (drag.source && drag.source.task) {
+                                root.previewTaskMove(drag.source.task.taskId, null, model.id, "after", hiddenCategoryDrop)
+                            } else if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
+                                root.previewCategoryMove(drag.source.categoryId, model.id, "after", hiddenCategoryDrop)
+                            }
+                        }
+                        onDropped: function(drop) {
+                            if (drop.source && drop.source.task) {
+                                root.commitTaskDrop(drop.source.task.taskId, null, model.id, "after")
+                                drop.acceptProposedAction()
+                            } else if (drop.source && drop.source.categoryId && drop.source.categoryId !== model.id) {
+                                root.commitCategoryDrop(drop.source.categoryId, model.id, "after")
+                                drop.acceptProposedAction()
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Kirigami.Theme.alternateBackgroundColor
+                            border.color: Kirigami.Theme.highlightColor
+                            border.width: 1
+                            radius: Kirigami.Units.smallSpacing
+                            opacity: parent.containsDrag ? 0.7 : 0.45
+
+                            PlasmaComponents.Label {
+                                anchors.centerIn: parent
+                                text: i18n("Move to %1", model.name)
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    Item {
+        id: dragOverlay
+        readonly property var sourceItem: root.draggedTaskItem || root.draggedCategoryItem
+        readonly property bool draggingTask: root.draggedTaskItem !== null
+        z: 100
+        visible: sourceItem !== null
+        width: sourceItem ? sourceItem.width : 0
+        height: sourceItem ? sourceItem.height : 0
+        x: {
+            if (!sourceItem) {
+                return 0
+            }
+            sourceItem.x
+            sourceItem.y
+            return sourceItem.mapToItem(root, 0, 0).x
+        }
+        y: {
+            if (!sourceItem) {
+                return 0
+            }
+            sourceItem.x
+            sourceItem.y
+            return sourceItem.mapToItem(root, 0, 0).y
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: Kirigami.Theme.alternateBackgroundColor
+            border.color: Kirigami.Theme.highlightColor
+            border.width: 1
+            radius: Kirigami.Units.smallSpacing
+            opacity: 0.9
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: Kirigami.Units.largeSpacing
+                anchors.rightMargin: Kirigami.Units.largeSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                Rectangle {
+                    Layout.fillHeight: true
+                    Layout.preferredWidth: Kirigami.Units.smallSpacing
+                    color: dragOverlay.draggingTask && root.draggedTaskData
+                        ? root.draggedTaskData.categoryColor : (root.draggedCategoryData ? root.draggedCategoryData.color : Kirigami.Theme.highlightColor)
+                    radius: width / 2
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: dragOverlay.draggingTask && root.draggedTaskData
+                        ? root.draggedTaskData.title : (root.draggedCategoryData ? root.draggedCategoryData.name : "")
+                    font.bold: true
+                    elide: Text.ElideRight
                 }
             }
         }
@@ -577,11 +995,7 @@ Item {
             if (!task || categoryModel.count === 0) {
                 return
             }
-            Database.moveTask({
-                taskId: task.taskId,
-                targetCategoryId: categoryModel.get(moveTaskCategory.currentIndex).id
-            })
-            root.reload()
+            root.moveTaskById(task.taskId, null, categoryModel.get(moveTaskCategory.currentIndex).id, "before")
         }
 
         contentItem: PlasmaComponents.ComboBox {
@@ -696,8 +1110,7 @@ Item {
                             enabled: index > 0
                             Accessible.name: i18n("Move category %1 up", model.name)
                             onClicked: {
-                                Database.moveCategory({ categoryId: model.id, targetCategoryId: categoryModel.get(index - 1).id, placement: "before" })
-                                root.reload()
+                                root.moveCategory(model.id, categoryModel.get(index - 1).id, "before")
                             }
                         }
 
@@ -706,8 +1119,7 @@ Item {
                             enabled: index + 1 < categoryModel.count
                             Accessible.name: i18n("Move category %1 down", model.name)
                             onClicked: {
-                                Database.moveCategory({ categoryId: model.id, targetCategoryId: categoryModel.get(index + 1).id, placement: "after" })
-                                root.reload()
+                                root.moveCategory(model.id, categoryModel.get(index + 1).id, "after")
                             }
                         }
 

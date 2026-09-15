@@ -15,10 +15,16 @@ Kirigami.AbstractCard {
     signal statusRequested(string status)
     property bool canMoveUp: false
     property bool canMoveDown: false
+    property real dragOriginX: 0
+    property real dragOriginY: 0
     signal moveUpRequested()
     signal moveDownRequested()
     signal moveToCategoryRequested()
-    signal dropRequested(string sourceTaskId)
+    signal dragStarted(var dragItem)
+    signal dragPreviewRequested(string sourceTaskId, string placement, var targetItem)
+    signal dragFinished()
+    signal dropRequested(string sourceTaskId, string placement)
+    readonly property bool dragging: dragHandler.active
 
     implicitHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
     activeFocusOnTab: true
@@ -83,7 +89,7 @@ Kirigami.AbstractCard {
 
         PlasmaComponents.ToolButton {
             id: dragHandle
-            icon.name: "openhand-cursor"
+            icon.name: "drag-handle-symbolic"
             Accessible.name: i18n("Drag %1 to reorder or move it", root.task.title)
         }
 
@@ -106,9 +112,17 @@ Kirigami.AbstractCard {
         parent: dragHandle
         target: root
         onActiveChanged: {
-            root.opacity = active ? 0.55 : 1.0
+            if (active) {
+                root.dragOriginX = root.x
+                root.dragOriginY = root.y
+                root.dragStarted(root)
+            }
+            root.opacity = active ? 0 : 1.0
             if (!active) {
                 root.Drag.drop()
+                root.x = root.dragOriginX
+                root.y = root.dragOriginY
+                root.dragFinished()
             }
         }
     }
@@ -116,9 +130,22 @@ Kirigami.AbstractCard {
     DropArea {
         anchors.fill: parent
         keys: ["application/x-worktodo-task"]
+        function placementFor(drag) {
+            return drag.y >= height / 2 ? "after" : "before"
+        }
+        onEntered: function(drag) {
+            if (drag.source && drag.source.task && drag.source.task.taskId !== root.task.taskId) {
+                root.dragPreviewRequested(drag.source.task.taskId, placementFor(drag), root.parent)
+            }
+        }
+        onPositionChanged: function(drag) {
+            if (drag.source && drag.source.task && drag.source.task.taskId !== root.task.taskId) {
+                root.dragPreviewRequested(drag.source.task.taskId, placementFor(drag), root.parent)
+            }
+        }
         onDropped: function(drop) {
             if (drop.source && drop.source.task && drop.source.task.taskId !== root.task.taskId) {
-                root.dropRequested(drop.source.task.taskId)
+                root.dropRequested(drop.source.task.taskId, placementFor(drop))
                 drop.acceptProposedAction()
             }
         }
