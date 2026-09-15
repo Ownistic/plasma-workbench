@@ -21,6 +21,13 @@ Kirigami.AbstractCard {
     signal dropRequested(string sourceTaskId)
 
     implicitHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
+    activeFocusOnTab: true
+    Accessible.role: Accessible.Button
+    Accessible.name: i18n("Open task %1", root.task.title)
+
+    Keys.onReturnPressed: root.openRequested()
+    Keys.onEnterPressed: root.openRequested()
+    Keys.onSpacePressed: root.openRequested()
 
     contentItem: RowLayout {
         id: content
@@ -72,12 +79,6 @@ Kirigami.AbstractCard {
             icon.name: root.active ? "media-playback-pause" : "media-playback-start"
             Accessible.name: root.active ? i18n("Pause timer for %1", root.task.title) : i18n("Start timer for %1", root.task.title)
             onClicked: root.timerRequested()
-        }
-
-        PlasmaComponents.ToolButton {
-            icon.name: "document-edit"
-            Accessible.name: i18n("Open details for %1", root.task.title)
-            onClicked: root.openRequested()
         }
 
         PlasmaComponents.ToolButton {

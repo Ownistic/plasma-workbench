@@ -15,6 +15,7 @@ Item {
     required property var plasmoidRoot
     property var selectedStatuses: []
     property alias categories: categoryModel
+    property string currentPage: "board"
     readonly property var activeSession: root.plasmoidRoot.activeSession
     readonly property bool hasActiveSession: root.plasmoidRoot.hasActiveSession
     readonly property string activeElapsedText: root.plasmoidRoot.activeElapsedText
@@ -139,6 +140,27 @@ Item {
         root.reload()
     }
 
+    function openTask(taskId) {
+        detailsDialog.loadTask(taskId)
+        if (detailsDialog.task) {
+            root.currentPage = "details"
+        }
+    }
+
+    function closeTaskDetails() {
+        detailsDialog.visible = false
+        root.currentPage = "board"
+        taskList.forceActiveFocus()
+    }
+
+    function requestTaskDetailsClose() {
+        if (detailsDialog.hasUnsavedChanges) {
+            discardTaskChangesDialog.open()
+            return
+        }
+        root.closeTaskDetails()
+    }
+
     Component.onCompleted: {
         Database.setTimeZoneValidator(function(timezoneId) {
             return WorkTodoTime.TimeMath.isValidTimeZone(timezoneId)
@@ -152,9 +174,11 @@ Item {
     }
 
     ColumnLayout {
+        id: boardContent
         anchors.fill: parent
         anchors.margins: Kirigami.Units.largeSpacing
         spacing: Kirigami.Units.largeSpacing
+        visible: root.currentPage === "board"
 
         RowLayout {
             Layout.fillWidth: true
@@ -307,7 +331,7 @@ Item {
                                 canMoveUp: root.adjacentTask(model, -1) !== null
                                 canMoveDown: root.adjacentTask(model, 1) !== null
                                 onTimerRequested: root.toggleTimer(model)
-                                onOpenRequested: detailsDialog.openForTask(model.taskId)
+                                onOpenRequested: root.openTask(model.taskId)
                                 onMoveUpRequested: root.moveTask(model, root.adjacentTask(model, -1), "before")
                                 onMoveDownRequested: root.moveTask(model, root.adjacentTask(model, 1), "after")
                                 onMoveToCategoryRequested: moveTaskDialog.openForTask(model)
@@ -317,6 +341,34 @@ Item {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    Controls.Dialog {
+        id: discardTaskChangesDialog
+        parent: root
+        modal: true
+        title: i18n("Discard task changes?")
+        contentItem: ColumnLayout {
+            width: Kirigami.Units.gridUnit * 24
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Your unsaved changes to this task will be lost.")
+                wrapMode: Text.Wrap
+            }
+        }
+        footer: Controls.DialogButtonBox {
+            Controls.Button {
+                text: i18n("Keep editing")
+                onClicked: discardTaskChangesDialog.close()
+            }
+            Controls.Button {
+                text: i18n("Discard changes")
+                onClicked: {
+                    discardTaskChangesDialog.close()
+                    root.closeTaskDetails()
                 }
             }
         }

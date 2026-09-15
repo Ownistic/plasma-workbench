@@ -20,7 +20,7 @@ foreach(source IN ITEMS "${todo_board}" "${task_details}" "${reports_view}")
     endif()
 endforeach()
 
-# Popups in a plasmoid need an explicit visual parent; ApplicationWindow's
+# Plasmoid overlays require an explicit visual parent; ApplicationWindow's
 # implicit overlay is unavailable in this component hierarchy.
 if(todo_board MATCHES "Controls\\.Dialog[^{]*\\{[^}]*parent:[ \t]*root\\.parent")
     message(FATAL_ERROR "TodoBoard dialogs must be parented to TodoBoard")
@@ -28,11 +28,11 @@ endif()
 if(task_details MATCHES "parent:[ \t]*root\\.parent" OR reports_view MATCHES "parent:[ \t]*root\\.parent")
     message(FATAL_ERROR "Nested dialogs must not rely on a parent dialog's QObject parent")
 endif()
-if(NOT task_details MATCHES "parent:[ \t]*root\\.contentItem" OR NOT reports_view MATCHES "parent:[ \t]*root\\.contentItem")
-    message(FATAL_ERROR "Nested dialogs must use their owning dialog's QQuickItem content parent")
+if(NOT task_details MATCHES "parent:[ \t]*popupHost")
+    message(FATAL_ERROR "Task-details overlays must use the page popup host")
 endif()
-if(NOT task_details MATCHES "parent:[ \t]*root\\.board" OR NOT reports_view MATCHES "parent:[ \t]*root\\.board")
-    message(FATAL_ERROR "Top-level details and report dialogs must be parented to TodoBoard")
+if(NOT reports_view MATCHES "parent:[ \t]*root\\.contentItem" OR NOT reports_view MATCHES "parent:[ \t]*root\\.board")
+    message(FATAL_ERROR "Report dialogs must use TodoBoard's visual hierarchy")
 endif()
 
 # TaskDetails is a separate component, so it cannot access TodoBoard's private
@@ -44,10 +44,22 @@ if(task_details MATCHES "board\\.categoryModel" OR NOT task_details MATCHES "boa
     message(FATAL_ERROR "TaskDetails must use TodoBoard's public categories model")
 endif()
 
-# A root-level TapHandler swallowed edit and overflow button clicks. Details
-# taps belong only to the task information column, while the menu is anchored.
+# Task editing is an in-place page. The card body, not a redundant pencil icon,
+# opens it while timer, drag, and overflow controls retain their own actions.
+if(NOT task_details MATCHES "FocusScope" OR NOT task_details MATCHES "function loadTask" OR NOT task_details MATCHES "function requestClose")
+    message(FATAL_ERROR "TaskDetails must remain an in-place details page")
+endif()
+if(NOT task_details MATCHES "hasUnsavedChanges")
+    message(FATAL_ERROR "TaskDetails must expose unsaved-change state for guarded navigation")
+endif()
+if(NOT todo_board MATCHES "property string currentPage" OR NOT todo_board MATCHES "function openTask" OR NOT todo_board MATCHES "function requestTaskDetailsClose" OR NOT todo_board MATCHES "onOpenRequested:[ \t]*root\\.openTask")
+    message(FATAL_ERROR "TodoBoard must route card activation to the details page")
+endif()
+if(task_card MATCHES "icon\\.name:[ \t]*\"document-edit\"")
+    message(FATAL_ERROR "Task cards must not expose a redundant edit button")
+endif()
 if(NOT task_card MATCHES "onTapped:[ \t]*root\\.openRequested\\(\\)")
-    message(FATAL_ERROR "Task information must retain a details-open tap handler")
+    message(FATAL_ERROR "Task information must retain a details-page tap handler")
 endif()
 if(NOT task_card MATCHES "taskActionsMenu\\.popup\\(taskActionsButton, 0, taskActionsButton\\.height\\)")
     message(FATAL_ERROR "Task action menu must be anchored to its button")

@@ -8,42 +8,77 @@ import "../code/Database.js" as Database
 import "../code/Markdown.js" as Markdown
 import "time" as WorkTodoTime
 
-Controls.Dialog {
+FocusScope {
     id: root
 
     required property var board
-    parent: root.board
     property string taskId: ""
     property var task: null
+    property string loadedTitle: ""
+    property string loadedDescription: ""
+    property string loadedCategoryId: ""
+    property string loadedStatus: ""
     property bool showDescriptionPreview: false
     property bool manualSessionOpen: false
     property bool manualSessionLongConfirmed: false
+    readonly property bool hasUnsavedChanges: root.task && (
+        titleField.text !== root.loadedTitle
+        || descriptionField.text !== root.loadedDescription
+        || root.selectedCategoryId() !== root.loadedCategoryId
+        || statusField.currentValue !== root.loadedStatus
+    )
     readonly property bool hasManualCorrections: root.task && (
         root.task.workSessions.some(function(session) { return session.manually_edited })
         || root.task.statusEvents.some(function(event) { return event.manually_edited })
     )
-    modal: true
-    title: root.task ? root.task.title : i18n("Task details")
-    width: Math.min(root.board.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 32)
-    height: Math.min(root.board.height - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 42)
+    signal closeRequested()
+    anchors.fill: parent
+    visible: false
+    focus: visible
 
-    function openForTask(id) {
+    function selectedCategoryId() {
+        return categoryField.currentIndex >= 0 && categoryField.currentIndex < root.board.categories.count
+            ? root.board.categories.get(categoryField.currentIndex).id : ""
+    }
+
+    function loadTask(id) {
         root.taskId = id
         root.task = Database.getTask(id)
         if (!root.task) {
+            root.visible = false
             return
         }
         titleField.text = root.task.title
         descriptionField.text = root.task.details
+        root.loadedTitle = root.task.title
+        root.loadedDescription = root.task.details
+        root.loadedCategoryId = root.task.category_id
+        root.loadedStatus = root.task.status
         showDescriptionPreview = false
         statusField.currentIndex = statusField.indexOfValue(root.task.status)
+        categoryField.currentIndex = -1
         for (let index = 0; index < root.board.categories.count; index += 1) {
             if (root.board.categories.get(index).id === root.task.category_id) {
                 categoryField.currentIndex = index
                 break
             }
         }
-        root.open()
+        root.visible = true
+        root.forceActiveFocus()
+    }
+
+    // Keep the current board integration working while it migrates to loadTask().
+    function openForTask(id) {
+        root.loadTask(id)
+    }
+
+    function requestClose() {
+        if (typeof root.board.requestTaskDetailsClose === "function") {
+            root.board.requestTaskDetailsClose()
+        } else {
+            root.closeRequested()
+            root.visible = false
+        }
     }
 
     function saveTask() {
@@ -59,6 +94,10 @@ Controls.Dialog {
             status: statusField.currentValue
         })
         root.task = Database.getTask(root.taskId)
+        root.loadedTitle = root.task.title
+        root.loadedDescription = root.task.details
+        root.loadedCategoryId = root.task.category_id
+        root.loadedStatus = root.task.status
         root.board.reload()
     }
 
@@ -315,10 +354,54 @@ Controls.Dialog {
         correctionDeletion.open()
     }
 
-    contentItem: Controls.ScrollView {
+    Rectangle {
+        id: pageHeader
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        implicitHeight: headerLayout.implicitHeight + Kirigami.Units.largeSpacing * 2
+        color: Kirigami.Theme.backgroundColor
+
+        RowLayout {
+            id: headerLayout
+            anchors.fill: parent
+            anchors.leftMargin: Kirigami.Units.largeSpacing
+            anchors.rightMargin: Kirigami.Units.largeSpacing
+            anchors.topMargin: Kirigami.Units.largeSpacing
+            anchors.bottomMargin: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.largeSpacing
+
+            PlasmaComponents.Button {
+                text: i18n("Back")
+                onClicked: root.requestClose()
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 0
+
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    level: 3
+                    text: root.task ? root.task.title : i18n("Task details")
+                    elide: Text.ElideRight
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: root.task ? i18n("Status: %1", statusField.currentValue.replace("_", " ")) : ""
+                    color: Kirigami.Theme.disabledTextColor
+                }
+            }
+        }
+    }
+
+    Controls.ScrollView {
         id: detailsScroll
-        implicitWidth: Kirigami.Units.gridUnit * 30
-        implicitHeight: Kirigami.Units.gridUnit * 36
+        anchors.top: pageHeader.bottom
+        anchors.bottom: pageActions.top
+        anchors.left: parent.left
+        anchors.right: parent.right
         clip: true
         leftPadding: Kirigami.Units.largeSpacing
         // Plasma renders scrollbars as an overlay, so reserve its width rather
@@ -331,13 +414,6 @@ Controls.Dialog {
         ColumnLayout {
             width: detailsScroll.availableWidth
             spacing: Kirigami.Units.largeSpacing
-
-            PlasmaComponents.Label {
-                Layout.fillWidth: true
-                text: i18n("Task details")
-                font.bold: true
-                color: Kirigami.Theme.textColor
-            }
 
             PlasmaComponents.Label {
                 Layout.fillWidth: true
@@ -650,7 +726,7 @@ Controls.Dialog {
                     onClicked: {
                         Database.archiveTask(root.taskId)
                         root.board.reload()
-                        root.close()
+                        root.requestClose()
                     }
                 }
 
@@ -664,23 +740,47 @@ Controls.Dialog {
         }
     }
 
-    footer: Controls.DialogButtonBox {
-        Controls.Button {
-            text: i18n("Close")
-            onClicked: root.close()
-        }
+    Rectangle {
+        id: pageActions
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        implicitHeight: actionLayout.implicitHeight + Kirigami.Units.largeSpacing * 2
+        color: Kirigami.Theme.backgroundColor
 
-        Controls.Button {
-            text: i18n("Save changes")
-            highlighted: true
-            Accessible.name: i18n("Save task changes")
-            onClicked: root.saveTask()
+        RowLayout {
+            id: actionLayout
+            anchors.fill: parent
+            anchors.leftMargin: Kirigami.Units.largeSpacing
+            anchors.rightMargin: Kirigami.Units.largeSpacing
+            anchors.topMargin: Kirigami.Units.largeSpacing
+            anchors.bottomMargin: Kirigami.Units.largeSpacing
+
+            PlasmaComponents.Button {
+                text: i18n("Close")
+                onClicked: root.requestClose()
+            }
+
+            Item { Layout.fillWidth: true }
+
+            PlasmaComponents.Button {
+                text: i18n("Save changes")
+                highlighted: true
+                enabled: root.hasUnsavedChanges
+                Accessible.name: i18n("Save task changes")
+                onClicked: root.saveTask()
+            }
         }
+    }
+
+    Item {
+        id: popupHost
+        anchors.fill: parent
     }
 
     Controls.Dialog {
         id: correctionDeletion
-        parent: root.contentItem
+        parent: popupHost
         modal: true
         property string kind: ""
         property string itemId: ""
@@ -709,7 +809,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: workSessionEditor
-        parent: root.contentItem
+        parent: popupHost
         modal: true
         property var session: null
         property string timezoneId: ""
@@ -801,7 +901,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: longSessionConfirmation
-        parent: root.contentItem
+        parent: popupHost
         modal: true
         property string durationText: ""
         property bool inlineSession: false
@@ -835,7 +935,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: statusEventEditor
-        parent: root.contentItem
+        parent: popupHost
         modal: true
         property var event: null
         title: i18n("Edit status event")
@@ -880,7 +980,7 @@ Controls.Dialog {
 
     Controls.Dialog {
         id: deleteConfirmation
-        parent: root.contentItem
+        parent: popupHost
         modal: true
         title: i18n("Delete task?")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Yes
@@ -892,7 +992,7 @@ Controls.Dialog {
         onAccepted: {
             Database.deleteTask(root.taskId)
             root.board.reload()
-            root.close()
+            root.requestClose()
         }
     }
 }
