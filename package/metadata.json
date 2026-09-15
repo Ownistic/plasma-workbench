@@ -1,0 +1,18 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "OwnisticApps"
+            }
+        ],
+        "Category": "Utilities",
+        "Description": "Organize work tasks and track work time.",
+        "Icon": "view-task",
+        "Id": "io.github.ownisticapps.worktodo",
+        "License": "GPL-3.0-or-later",
+        "Name": "Work Todo",
+        "Version": "0.1.0"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

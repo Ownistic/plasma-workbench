@@ -1,0 +1,2 @@
+module io.github.ownisticapps.worktodo.time
+plugin worktodo_timeplugin

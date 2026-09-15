@@ -1,29 +1,38 @@
-# Work Todo Plasmoid documentation
+# Work Todo
 
-This documentation set defines a KDE Plasma 6 desktop widget for personal work organization, task status tracking, and time reporting.
+Work Todo is a KDE Plasma 6 desktop widget for personal task management and local work-time tracking.
 
-## Documents
+## Build and Test
 
-- [PRD.md](PRD.md): Product requirements, scope, user flows, acceptance criteria, and release plan.
-- [KDE_PLASMA_API.md](docs/KDE_PLASMA_API.md): Plasma 6, Kirigami, KConfig, and KQuickCharts APIs relevant to the widget.
-- [QT_QML_API.md](docs/QT_QML_API.md): Qt Quick models, delegates, drag-and-drop, timers, and SQLite APIs.
-- [PERSISTENCE_AND_REPORTING.md](docs/PERSISTENCE_AND_REPORTING.md): Database schema, invariants, migrations, time calculations, and report behavior.
-- [DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md): CachyOS setup, project layout, installation, testing, debugging, and packaging.
-- [REFERENCES.md](docs/REFERENCES.md): Annotated primary references and compatibility notes.
+The data repository is QML JavaScript using `QtQuick.LocalStorage`. A small Qt 6 QML module supplies IANA timezone and daylight-saving-safe report calculations.
 
-## Recommended implementation
+```sh
+cmake -S . -B build -G Ninja
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
-Build version 1 as a pure QML Plasma package:
+Use Qt 6 tooling explicitly on this system:
 
-- `PlasmoidItem` hosts the desktop widget.
-- Plasma Components and Kirigami provide the interface.
-- `QtQuick.LocalStorage` stores application data in SQLite.
-- KConfig stores widget preferences only.
-- KQuickCharts renders weekly and monthly reports.
+```sh
+/usr/lib/qt6/bin/qmllint -I build/qml package/contents/ui
+/usr/lib/qt6/bin/qmltestrunner -import build/qml -input tests/qml
+```
 
-Keep database access behind a repository module. This boundary permits a later migration to a Qt/C++ backend without rewriting the interface.
+Install both the QML plugin and plasmoid to the chosen prefix:
 
-## Working product name
+```sh
+cmake --install build --prefix "$HOME/.local"
+```
 
-The documents use **Work Todo Plasmoid** as a working name. The final widget name and reverse-domain plugin identifier remain product decisions.
+Install `plasma-sdk` before visual testing with `plasmoidviewer`.
+
+## Documentation
+
+- [PRD.md](PRD.md): Product requirements and acceptance criteria.
+- [KDE_PLASMA_API.md](KDE_PLASMA_API.md): Plasma 6, Kirigami, KConfig, and chart APIs.
+- [QT_QML_API.md](QT_QML_API.md): QML, model, drag, timer, and SQLite guidance.
+- [PERSISTENCE_AND_REPORTING.md](PERSISTENCE_AND_REPORTING.md): Schema, transitions, and report rules.
+- [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md): Environment, tests, and release workflow.
+- [REFERENCES.md](REFERENCES.md): Primary upstream references.
 
