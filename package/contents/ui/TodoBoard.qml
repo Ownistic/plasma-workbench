@@ -30,7 +30,9 @@ Item {
     property real draggedCategoryTargetBaseHeight: 0
     property var draggedCategoryItem: null
     property var draggedCategoryData: null
-    property var draggedCategoryTasks: []
+    readonly property int categoryDragPreviewTaskLimit: 3
+    property var draggedCategoryTaskPreview: []
+    property int draggedCategoryTaskCount: 0
     property real draggedCategoryGroupHeight: 0
     property real draggedCategoryOverlayX: 0
     property real draggedCategoryOverlayY: 0
@@ -335,14 +337,19 @@ Item {
             Number(group.childrenRect ? group.childrenRect.height : 0),
             Kirigami.Units.gridUnit * 2
         )
-        const tasks = []
+        const taskPreview = []
+        let taskCount = 0
         for (let index = 0; index < taskModel.count; index += 1) {
             const task = taskModel.get(index)
             if (task.categoryId === category.id && task.categoryCollapsed === 0) {
-                tasks.push({ title: task.title, status: task.status, categoryColor: task.categoryColor })
+                taskCount += 1
+                if (taskPreview.length < root.categoryDragPreviewTaskLimit) {
+                    taskPreview.push({ title: task.title, status: task.status, categoryColor: task.categoryColor })
+                }
             }
         }
-        root.draggedCategoryTasks = tasks
+        root.draggedCategoryTaskPreview = taskPreview
+        root.draggedCategoryTaskCount = taskCount
         root.categoryDropHandled = false
         root.draggedCategoryTargetId = ""
         root.draggedCategoryPlacement = "before"
@@ -401,7 +408,8 @@ Item {
         root.draggedCategoryTargetBaseHeight = 0
         root.draggedCategoryItem = null
         root.draggedCategoryData = null
-        root.draggedCategoryTasks = []
+        root.draggedCategoryTaskPreview = []
+        root.draggedCategoryTaskCount = 0
         root.draggedCategoryGroupHeight = 0
         root.draggedCategoryOverlayX = 0
         root.draggedCategoryOverlayY = 0
@@ -619,7 +627,7 @@ Item {
                                     }
 
                                     Repeater {
-                                        model: root.draggedCategoryTasks
+                                        model: root.draggedCategoryTaskPreview
 
                                         delegate: PlasmaComponents.Label {
                                             required property var modelData
@@ -627,6 +635,14 @@ Item {
                                             text: modelData.title
                                             elide: Text.ElideRight
                                         }
+                                    }
+
+                                    PlasmaComponents.Label {
+                                        Layout.fillWidth: true
+                                        visible: root.draggedCategoryTaskCount > root.draggedCategoryTaskPreview.length
+                                        text: i18np("%1 more task", "%1 more tasks",
+                                            root.draggedCategoryTaskCount - root.draggedCategoryTaskPreview.length)
+                                        elide: Text.ElideRight
                                     }
                                 }
                             }
@@ -859,7 +875,7 @@ Item {
                                     }
 
                                     Repeater {
-                                        model: root.draggedCategoryTasks
+                                        model: root.draggedCategoryTaskPreview
 
                                         delegate: PlasmaComponents.Label {
                                             required property var modelData
@@ -867,6 +883,14 @@ Item {
                                             text: modelData.title
                                             elide: Text.ElideRight
                                         }
+                                    }
+
+                                    PlasmaComponents.Label {
+                                        Layout.fillWidth: true
+                                        visible: root.draggedCategoryTaskCount > root.draggedCategoryTaskPreview.length
+                                        text: i18np("%1 more task", "%1 more tasks",
+                                            root.draggedCategoryTaskCount - root.draggedCategoryTaskPreview.length)
+                                        elide: Text.ElideRight
                                     }
                                 }
                             }
@@ -1034,7 +1058,7 @@ Item {
                 }
 
                 Repeater {
-                    model: root.draggedCategoryTasks
+                    model: root.draggedCategoryTaskPreview
 
                     delegate: Rectangle {
                         required property var modelData
@@ -1064,6 +1088,14 @@ Item {
                             }
                         }
                     }
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    visible: root.draggedCategoryTaskCount > root.draggedCategoryTaskPreview.length
+                    text: i18np("%1 more task", "%1 more tasks",
+                        root.draggedCategoryTaskCount - root.draggedCategoryTaskPreview.length)
+                    elide: Text.ElideRight
                 }
 
                 Item { Layout.fillHeight: true }

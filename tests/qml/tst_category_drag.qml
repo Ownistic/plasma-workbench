@@ -80,6 +80,8 @@ TestCase {
         const second = Database.createCategory({ name: "Second", color: "#8ae234" })
         Database.createTask({ categoryId: first.id, title: "First task", status: "ready" })
         Database.createTask({ categoryId: first.id, title: "Second task", status: "ready" })
+        Database.createTask({ categoryId: first.id, title: "Third task", status: "ready" })
+        Database.createTask({ categoryId: first.id, title: "Fourth task", status: "ready" })
         Database.createTask({ categoryId: second.id, title: "Third task", status: "ready" })
 
         board = createTemporaryObject(boardComponent, stage)
@@ -114,6 +116,9 @@ TestCase {
         board.beginCategoryDrag(firstCategory, handle, sourceSlot)
         compare(board.draggedCategoryId, firstCategory.id)
         verify(board.draggedCategoryId.length > 0)
+        compare(board.draggedCategoryTaskCount, 4)
+        compare(board.draggedCategoryTaskPreview.length, board.categoryDragPreviewTaskLimit,
+            "Category drags must not create a visual delegate for every task")
         verify(!overlay.draggingTask)
         verify(overlay.sourceItem !== null)
         tryVerify(function() { return overlay.active }, 1000)
