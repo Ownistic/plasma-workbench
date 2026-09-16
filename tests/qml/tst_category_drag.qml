@@ -33,7 +33,13 @@ TestCase {
         property string activeTaskSummary: "No active timer"
         property int elapsedRefresh: 0
         function formatSeconds(seconds) {
-            return "00:00:00"
+            const safeSeconds = Math.max(0, Math.floor(seconds))
+            const hours = Math.floor(safeSeconds / 3600)
+            const minutes = Math.floor((safeSeconds % 3600) / 60)
+            const remainingSeconds = safeSeconds % 60
+            return (hours < 10 ? "0" : "") + hours + ":"
+                + (minutes < 10 ? "0" : "") + minutes + ":"
+                + (remainingSeconds < 10 ? "0" : "") + remainingSeconds
         }
         function elapsedSeconds(utc) {
             return 0
@@ -173,5 +179,35 @@ TestCase {
         const active = Database.getActiveSessions()
         compare(active.length, 1)
         compare(active[0].task_id, tasks[1].taskId)
+    }
+
+    function test_categoryTimeTogglesBetweenTodayAndTotal() {
+        const category = Database.listCategories()[0]
+        const task = Database.listTasks({ statuses: ["ready"] })[0]
+        Database.createWorkSession({
+            taskId: task.taskId,
+            startedAtUtc: "2024-01-01T09:00:00.000Z",
+            endedAtUtc: "2024-01-01T10:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+        const endedAt = new Date(Date.now() - 60 * 1000)
+        const startedAt = new Date(endedAt.getTime() - 60 * 1000)
+        Database.createWorkSession({
+            taskId: task.taskId,
+            startedAtUtc: startedAt.toISOString(),
+            endedAtUtc: endedAt.toISOString(),
+            timezoneId: "Etc/UTC"
+        })
+        board.reload()
+
+        const timeButton = findChild(board, "category-time-" + category.id)
+        verify(timeButton !== null)
+        verify(timeButton.text.indexOf("Today: ") === 0)
+        const todayText = timeButton.text
+        timeButton.click()
+        tryVerify(function() { return timeButton.text.indexOf("Total: ") === 0 }, 1000)
+        verify(timeButton.text !== todayText)
+        timeButton.click()
+        tryVerify(function() { return timeButton.text.indexOf("Today: ") === 0 }, 1000)
     }
 }

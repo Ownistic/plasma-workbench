@@ -158,7 +158,7 @@ QVariantMap TimeMath::possibleUtcInstantsForLocal(int year, int month, int day,
 }
 
 QVariantMap TimeMath::formatUtcForLocal(const QString &utc, const QString &timeZoneId,
-                                        bool use24Hour) const
+                                         bool use24Hour) const
 {
     const QVariantMap parts = localPartsForUtc(utc, timeZoneId);
     if (!parts.value(QStringLiteral("valid")).toBool()) {
@@ -177,8 +177,28 @@ QVariantMap TimeMath::formatUtcForLocal(const QString &utc, const QString &timeZ
     };
 }
 
+QVariantMap TimeMath::dayRange(int year, int month, int day, const QString &timeZoneId) const
+{
+    const QDate date(year, month, day);
+    if (!date.isValid()) {
+        return invalidResult(QStringLiteral("The local date is invalid."));
+    }
+
+    QTimeZone timeZone;
+    if (!timeZoneForId(timeZoneId, &timeZone)) {
+        return invalidResult(QStringLiteral("The time zone ID is invalid."));
+    }
+
+    const QDateTime start = localMidnight(date, timeZone);
+    const QDateTime end = localMidnight(date.addDays(1), timeZone);
+    if (!start.isValid() || !end.isValid() || start >= end) {
+        return invalidResult(QStringLiteral("The local day does not map to a valid UTC range."));
+    }
+    return rangeResult(start, end, timeZone);
+}
+
 QVariantMap TimeMath::weekRange(int year, int month, int day, const QString &timeZoneId,
-                                int firstDayOfWeek) const
+                                 int firstDayOfWeek) const
 {
     const QDate date(year, month, day);
     if (!date.isValid()) {

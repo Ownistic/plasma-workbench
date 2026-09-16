@@ -12,9 +12,12 @@ PlasmaExtras.ListSectionHeader {
     required property string categoryColor
     required property string categoryId
     required property bool collapsed
+    required property string timeText
+    required property bool showingTotalTime
     signal editRequested()
     signal deleteRequested()
     signal collapseRequested()
+    signal timeDisplayToggleRequested()
     signal dragStarted(var dragItem, var dragGroup)
     signal dragPositionChanged(var dragItem)
     signal dragPreviewRequested(string sourceCategoryId, string placement, var targetItem)
@@ -46,6 +49,19 @@ PlasmaExtras.ListSectionHeader {
             font.bold: true
             elide: Text.ElideRight
             Accessible.name: i18n("Category: %1", root.categoryName)
+        }
+
+        Controls.ToolButton {
+            id: categoryTimeButton
+            objectName: "category-time-" + root.categoryId
+            text: root.timeText
+            Accessible.name: root.showingTotalTime
+                ? i18n("Total tracked time for %1: %2. Click to show today's time.", root.categoryName, root.timeText)
+                : i18n("Today's tracked time for %1: %2. Click to show total time.", root.categoryName, root.timeText)
+            Controls.ToolTip.visible: hovered
+            Controls.ToolTip.text: root.showingTotalTime
+                ? i18n("Show today's tracked time") : i18n("Show total tracked time")
+            onClicked: root.timeDisplayToggleRequested()
         }
 
         PlasmaComponents.ToolButton {

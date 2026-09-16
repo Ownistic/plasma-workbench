@@ -9,6 +9,7 @@ class TimeMathTest : public QObject
 private slots:
     void splitsCrossMidnight();
     void splitsDstTransition();
+    void calculatesDayRange();
     void calculatesWeekRange();
     void calculatesMonthRange();
     void convertsUtcToLocalDate();
@@ -58,6 +59,16 @@ void TimeMathTest::splitsDstTransition()
     const QVariantMap followingDay = segments.at(1).toMap();
     QCOMPARE(followingDay.value(QStringLiteral("localDate")).toString(), QStringLiteral("2024-04-01"));
     QCOMPARE(followingDay.value(QStringLiteral("durationSeconds")).toLongLong(), 2 * 3600LL);
+}
+
+void TimeMathTest::calculatesDayRange()
+{
+    TimeMath timeMath;
+    const QVariantMap range = timeMath.dayRange(2024, 3, 31, QStringLiteral("Europe/Berlin"));
+
+    QVERIFY(range.value(QStringLiteral("valid")).toBool());
+    QCOMPARE(range.value(QStringLiteral("startUtc")).toString(), QStringLiteral("2024-03-30T23:00:00.000Z"));
+    QCOMPARE(range.value(QStringLiteral("endUtc")).toString(), QStringLiteral("2024-03-31T22:00:00.000Z"));
 }
 
 void TimeMathTest::calculatesWeekRange()
@@ -160,6 +171,7 @@ void TimeMathTest::rejectsInvalidInput()
 {
     TimeMath timeMath;
     QVERIFY(!timeMath.isValidTimeZone(QStringLiteral("Mars/Olympus")));
+    QVERIFY(!timeMath.dayRange(2024, 2, 30, QStringLiteral("Europe/Berlin")).value(QStringLiteral("valid")).toBool());
     QVERIFY(!timeMath.weekRange(2024, 2, 30, QStringLiteral("Europe/Berlin")).value(QStringLiteral("valid")).toBool());
     QVERIFY(!timeMath.monthRange(2024, 13, QStringLiteral("Europe/Berlin")).value(QStringLiteral("valid")).toBool());
     QVERIFY(!timeMath.weekRange(2024, 1, 1, QStringLiteral("Mars/Olympus")).value(QStringLiteral("valid")).toBool());

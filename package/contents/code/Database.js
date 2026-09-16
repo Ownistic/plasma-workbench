@@ -406,6 +406,61 @@ function listCategories() {
     })
 }
 
+function categoryTimeTotal(categoryId, currentUtc) {
+    categoryId = requireId(categoryId, "Category ID")
+    const activeEndUtc = requireUtcInstant(currentUtc || nowUtc(), "Category time end")
+    purgeExpiredTrash()
+    return read(function(tx) {
+        activeCategoryById(tx, categoryId)
+        const total = { categoryId: categoryId, trackedSeconds: 0, activeStartedAts: [],
+            intervalStartUtc: "", intervalEndUtc: "" }
+        const sessions = rows(tx.executeSql(
+            "SELECT work_sessions.started_at_utc AS startedAtUtc, " +
+            "MIN(COALESCE(work_sessions.ended_at_utc, ?), ?) AS endedAtUtc, work_sessions.ended_at_utc IS NULL AS active " +
+            "FROM work_sessions JOIN tasks ON tasks.id = work_sessions.task_id " +
+            "WHERE tasks.category_id = ? AND work_sessions.started_at_utc < ? " +
+            "ORDER BY work_sessions.started_at_utc, work_sessions.id",
+            [activeEndUtc, activeEndUtc, categoryId, activeEndUtc]
+        ))
+        for (let index = 0; index < sessions.length; index += 1) {
+            const session = sessions[index]
+            if (session.active) {
+                total.activeStartedAts.push(session.startedAtUtc)
+            }
+            if (!total.intervalStartUtc) {
+                total.intervalStartUtc = session.startedAtUtc
+                total.intervalEndUtc = session.endedAtUtc
+            } else if (session.startedAtUtc <= total.intervalEndUtc) {
+                if (session.endedAtUtc > total.intervalEndUtc) {
+                    total.intervalEndUtc = session.endedAtUtc
+                }
+            } else {
+                total.trackedSeconds += (Date.parse(total.intervalEndUtc) - Date.parse(total.intervalStartUtc)) / 1000
+                total.intervalStartUtc = session.startedAtUtc
+                total.intervalEndUtc = session.endedAtUtc
+            }
+        }
+        if (total.intervalStartUtc) {
+            total.trackedSeconds += (Date.parse(total.intervalEndUtc) - Date.parse(total.intervalStartUtc)) / 1000
+        }
+        delete total.intervalStartUtc
+        delete total.intervalEndUtc
+        return total
+    })
+}
+
+function listActiveCategorySessions() {
+    purgeExpiredTrash()
+    return read(function(tx) {
+        return rows(tx.executeSql(
+            "SELECT tasks.category_id AS categoryId, work_sessions.started_at_utc AS startedAtUtc " +
+            "FROM work_sessions JOIN tasks ON tasks.id = work_sessions.task_id " +
+            "JOIN categories ON categories.id = tasks.category_id " +
+            "WHERE categories.trashed_at_utc IS NULL AND work_sessions.ended_at_utc IS NULL"
+        ))
+    })
+}
+
 function listTrashedCategories() {
     purgeExpiredTrash()
     return read(function(tx) {

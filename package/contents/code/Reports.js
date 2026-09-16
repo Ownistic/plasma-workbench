@@ -9,6 +9,51 @@ function addTotal(totals, id, label, color, seconds) {
     totals[id].seconds += seconds
 }
 
+function addInterval(intervals, id, label, color, startUtc, endUtc) {
+    if (!intervals[id]) {
+        intervals[id] = { id: id, label: label, color: color || "", intervals: [] }
+    }
+    intervals[id].intervals.push({ startUtc: startUtc, endUtc: endUtc })
+}
+
+function mergedTotals(intervals) {
+    const totals = {}
+    for (const id in intervals) {
+        const intervalTotal = intervals[id]
+        const sortedIntervals = intervalTotal.intervals.sort(function(left, right) {
+            return left.startUtc.localeCompare(right.startUtc)
+        })
+        let seconds = 0
+        let startUtc = ""
+        let endUtc = ""
+        for (let index = 0; index < sortedIntervals.length; index += 1) {
+            const interval = sortedIntervals[index]
+            if (!startUtc) {
+                startUtc = interval.startUtc
+                endUtc = interval.endUtc
+            } else if (interval.startUtc <= endUtc) {
+                if (interval.endUtc > endUtc) {
+                    endUtc = interval.endUtc
+                }
+            } else {
+                seconds += (Date.parse(endUtc) - Date.parse(startUtc)) / 1000
+                startUtc = interval.startUtc
+                endUtc = interval.endUtc
+            }
+        }
+        if (startUtc) {
+            seconds += (Date.parse(endUtc) - Date.parse(startUtc)) / 1000
+        }
+        totals[id] = {
+            id: intervalTotal.id,
+            label: intervalTotal.label,
+            color: intervalTotal.color,
+            seconds: seconds
+        }
+    }
+    return totals
+}
+
 function orderedTotals(totals) {
     return Object.keys(totals).map(function(key) { return totals[key] }).sort(function(left, right) {
         if (right.seconds !== left.seconds) {
@@ -40,9 +85,9 @@ function weekStart(date, firstDayOfWeek) {
 function aggregate(timeMath, range, timezoneId, currentUtc, firstDayOfWeek) {
     const sessions = Database.listReportSessions(range.startUtc, range.endUtc, currentUtc)
     const dates = {}
-    const categories = {}
+    const categoryIntervals = {}
     const tasks = {}
-    const dailyCategories = {}
+    const dailyCategoryIntervals = {}
     const dailyTasks = {}
     const weeks = {}
     let totalSeconds = 0
@@ -71,22 +116,24 @@ function aggregate(timeMath, range, timezoneId, currentUtc, firstDayOfWeek) {
             addTotal(dates, segment.localDate, segment.localDate, "", seconds)
             const calendarWeek = weekStart(segment.localDate, firstDayOfWeek)
             addTotal(weeks, calendarWeek, calendarWeek, "", seconds)
-            addTotal(categories, session.categoryId, session.categoryName, session.categoryColor, seconds)
+            addInterval(categoryIntervals, session.categoryId, session.categoryName, session.categoryColor,
+                segment.startUtc, segment.endUtc)
             addTotal(tasks, session.taskId, session.taskTitle, "", seconds)
-            if (!dailyCategories[segment.localDate]) {
-                dailyCategories[segment.localDate] = {}
+            if (!dailyCategoryIntervals[segment.localDate]) {
+                dailyCategoryIntervals[segment.localDate] = {}
             }
             if (!dailyTasks[segment.localDate]) {
                 dailyTasks[segment.localDate] = {}
             }
-            addTotal(dailyCategories[segment.localDate], session.categoryId, session.categoryName, session.categoryColor, seconds)
+            addInterval(dailyCategoryIntervals[segment.localDate], session.categoryId, session.categoryName,
+                session.categoryColor, segment.startUtc, segment.endUtc)
             addTotal(dailyTasks[segment.localDate], session.taskId, session.taskTitle, "", seconds)
         }
     }
 
     const byDate = orderedTotals(dates).sort(function(left, right) { return left.id.localeCompare(right.id) })
-    const dailyByCategory = Object.keys(dailyCategories).sort().map(function(date) {
-        return { date: date, categories: orderedTotals(dailyCategories[date]) }
+    const dailyByCategory = Object.keys(dailyCategoryIntervals).sort().map(function(date) {
+        return { date: date, categories: orderedTotals(mergedTotals(dailyCategoryIntervals[date])) }
     })
     const dailyByTask = Object.keys(dailyTasks).sort().map(function(date) {
         return { date: date, tasks: orderedTotals(dailyTasks[date]) }
@@ -97,11 +144,21 @@ function aggregate(timeMath, range, timezoneId, currentUtc, firstDayOfWeek) {
         totalSeconds: totalSeconds,
         byDate: byDate,
         byWeek: orderedTotals(weeks).sort(function(left, right) { return left.id.localeCompare(right.id) }),
-        byCategory: orderedTotals(categories),
+        byCategory: orderedTotals(mergedTotals(categoryIntervals)),
         byTask: orderedTotals(tasks),
         dailyByCategory: dailyByCategory,
         dailyByTask: dailyByTask
     }
+}
+
+function dailyReport(timeMath, input) {
+    input = input || {}
+    const range = timeMath.dayRange(input.year, input.month, input.day, input.timezoneId)
+    if (!range.valid) {
+        throw new Error(range.error)
+    }
+    return aggregate(timeMath, range, input.timezoneId, input.currentUtc,
+        input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek)
 }
 
 function weeklyReport(timeMath, input) {

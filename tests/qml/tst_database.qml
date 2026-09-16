@@ -347,6 +347,51 @@ TestCase {
         compare(report.byTask[0].id, task.id)
     }
 
+    function test_dailyReportUsesLocalCalendarDay() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Report task")
+        Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2024-01-01T22:00:00.000Z",
+            endedAtUtc: "2024-01-02T03:00:00.000Z",
+            timezoneId: "Europe/Berlin"
+        })
+
+        const report = Reports.dailyReport(WorkbenchTime.TimeMath, {
+            year: 2024,
+            month: 1,
+            day: 2,
+            timezoneId: "Europe/Berlin",
+            currentUtc: "2024-01-03T00:00:00.000Z"
+        })
+        compare(report.totalSeconds, 4 * 60 * 60)
+        compare(report.byCategory[0].id, category.id)
+        compare(report.byCategory[0].seconds, 4 * 60 * 60)
+    }
+
+    function test_categoryTimeMergesOverlappingTaskSessions() {
+        const category = createCategory("Product")
+        const first = createTask(category.id, "First task")
+        const second = createTask(category.id, "Second task")
+        Database.startTimer(first.id, "Etc/UTC", "2026-09-14T10:00:00.000Z", true)
+        Database.startTimer(second.id, "Etc/UTC", "2026-09-14T10:30:00.000Z", true)
+        Database.stopTimer(first.id, "2026-09-14T11:00:00.000Z")
+        Database.stopTimer(second.id, "2026-09-14T11:30:00.000Z")
+
+        const report = Reports.dailyReport(WorkbenchTime.TimeMath, {
+            year: 2026,
+            month: 9,
+            day: 14,
+            timezoneId: "Etc/UTC",
+            currentUtc: "2026-09-14T12:00:00.000Z"
+        })
+        compare(report.totalSeconds, 2 * 60 * 60)
+        compare(report.byCategory[0].seconds, 90 * 60)
+
+        const total = Database.categoryTimeTotal(category.id, "2026-09-14T12:00:00.000Z")
+        compare(total.trackedSeconds, 90 * 60)
+    }
+
     function test_categoryTrashRetainsReportHistory() {
         const category = createCategory("Product")
         const task = createTask(category.id, "Keep me")

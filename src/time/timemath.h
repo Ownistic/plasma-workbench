@@ -24,11 +24,13 @@ public:
                                                          int millisecond,
                                                          const QString &timeZoneId) const;
     Q_INVOKABLE QVariantMap formatUtcForLocal(const QString &utc, const QString &timeZoneId,
-                                              bool use24Hour) const;
+                                               bool use24Hour) const;
 
+    Q_INVOKABLE QVariantMap dayRange(int year, int month, int day,
+                                     const QString &timeZoneId) const;
     Q_INVOKABLE QVariantMap weekRange(int year, int month, int day,
-                                      const QString &timeZoneId,
-                                      int firstDayOfWeek = 1) const;
+                                       const QString &timeZoneId,
+                                       int firstDayOfWeek = 1) const;
     Q_INVOKABLE QVariantMap monthRange(int year, int month,
                                        const QString &timeZoneId) const;
     Q_INVOKABLE QVariantList splitInterval(const QString &startUtc,

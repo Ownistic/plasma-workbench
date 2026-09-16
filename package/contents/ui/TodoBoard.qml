@@ -7,6 +7,7 @@ import org.kde.plasma.extras as PlasmaExtras
 import "time" as WorkbenchTime
 
 import "../code/Database.js" as Database
+import "../code/Reports.js" as Reports
 
 Item {
     id: root
@@ -40,6 +41,12 @@ Item {
     property bool taskDropHandled: false
     property bool categoryDropHandled: false
     property string keepActiveTaskId: ""
+    property var activeCategoryStartedAts: ({})
+    property var categoryTotalTimes: ({})
+    property var todayCategorySeconds: ({})
+    property var totalTimeCategories: ({})
+    property double categoryTimeSnapshotMilliseconds: 0
+    property string todayLocalDate: ""
     readonly property var activeSessions: root.plasmoidRoot.activeSessions
     readonly property var activeSession: root.plasmoidRoot.activeSession
     readonly property bool hasActiveSession: root.plasmoidRoot.hasActiveSession
@@ -65,6 +72,18 @@ Item {
     }
 
     Timer {
+        interval: 60 * 1000
+        repeat: true
+        running: true
+        onTriggered: {
+            const localDate = WorkbenchTime.TimeMath.localDateForUtc(new Date().toISOString(), root.reportTimezone)
+            if (localDate && localDate !== root.todayLocalDate) {
+                root.reload()
+            }
+        }
+    }
+
+    Timer {
         id: moveErrorTimer
         interval: 5000
         onTriggered: root.moveError = ""
@@ -81,6 +100,102 @@ Item {
             ? root.plasmoidRoot.elapsedSeconds(task.activeStartedAt) : 0))
     }
 
+    function refreshCategoryTimes() {
+        const now = new Date()
+        const localParts = WorkbenchTime.TimeMath.localPartsForUtc(now.toISOString(), root.reportTimezone)
+        if (!localParts.valid) {
+            return
+        }
+        const report = Reports.dailyReport(WorkbenchTime.TimeMath, {
+            year: localParts.year,
+            month: localParts.month,
+            day: localParts.day,
+            timezoneId: root.reportTimezone,
+            firstDayOfWeek: root.firstDayOfWeek,
+            currentUtc: now.toISOString()
+        })
+        const todayTotals = {}
+        for (let index = 0; index < report.byCategory.length; index += 1) {
+            const category = report.byCategory[index]
+            todayTotals[category.id] = category.seconds
+        }
+        const activeSessionsByCategory = {}
+        const activeSessions = Database.listActiveCategorySessions()
+        for (let index = 0; index < activeSessions.length; index += 1) {
+            const session = activeSessions[index]
+            if (!activeSessionsByCategory[session.categoryId]) {
+                activeSessionsByCategory[session.categoryId] = []
+            }
+            activeSessionsByCategory[session.categoryId].push(session.startedAtUtc)
+        }
+        root.todayCategorySeconds = todayTotals
+        root.activeCategoryStartedAts = activeSessionsByCategory
+        root.categoryTimeSnapshotMilliseconds = now.getTime()
+        root.todayLocalDate = localParts.date
+        for (const categoryId in root.totalTimeCategories) {
+            if (root.totalTimeCategories[categoryId]) {
+                root.refreshCategoryTotal(categoryId, now)
+            }
+        }
+    }
+
+    function activeSecondsSinceSnapshot(startedAts, snapshotMilliseconds) {
+        let earliestStart = Date.now()
+        for (let index = 0; index < startedAts.length; index += 1) {
+            earliestStart = Math.min(earliestStart,
+                Math.max(Date.parse(startedAts[index]), snapshotMilliseconds))
+        }
+        return Math.max(0, (Date.now() - earliestStart) / 1000)
+    }
+
+    function refreshCategoryTotal(categoryId, now) {
+        const snapshot = now || new Date()
+        const total = Database.categoryTimeTotal(categoryId, snapshot.toISOString())
+        total.snapshotMilliseconds = snapshot.getTime()
+        const totals = {}
+        for (const visibleCategoryId in root.categoryTotalTimes) {
+            totals[visibleCategoryId] = root.categoryTotalTimes[visibleCategoryId]
+        }
+        totals[categoryId] = total
+        root.categoryTotalTimes = totals
+    }
+
+    function categoryTodaySeconds(categoryId) {
+        root.plasmoidRoot.elapsedRefresh
+        let seconds = Number(root.todayCategorySeconds[categoryId] || 0)
+        return seconds + root.activeSecondsSinceSnapshot(root.activeCategoryStartedAts[categoryId] || [],
+            root.categoryTimeSnapshotMilliseconds)
+    }
+
+    function categoryTotalSeconds(categoryId) {
+        root.plasmoidRoot.elapsedRefresh
+        const total = root.categoryTotalTimes[categoryId]
+        if (!total) {
+            return 0
+        }
+        let seconds = Number(total.trackedSeconds || 0)
+        return seconds + root.activeSecondsSinceSnapshot(total.activeStartedAts, total.snapshotMilliseconds)
+    }
+
+    function categoryTimeText(categoryId) {
+        const showTotal = root.totalTimeCategories[categoryId] === true
+        const seconds = showTotal ? root.categoryTotalSeconds(categoryId) : root.categoryTodaySeconds(categoryId)
+        return showTotal ? i18n("Total: %1", root.formatSeconds(seconds))
+            : i18n("Today: %1", root.formatSeconds(seconds))
+    }
+
+    function toggleCategoryTimeDisplay(categoryId) {
+        const visibleTotals = {}
+        for (const visibleCategoryId in root.totalTimeCategories) {
+            visibleTotals[visibleCategoryId] = root.totalTimeCategories[visibleCategoryId]
+        }
+        visibleTotals[categoryId] = visibleTotals[categoryId] !== true
+        root.totalTimeCategories = visibleTotals
+        if (visibleTotals[categoryId]) {
+            root.refreshCategoryTotal(categoryId)
+        }
+    }
+
     function formatTimestamp(utc) {
         const formatted = WorkbenchTime.TimeMath.formatUtcForLocal(utc, root.reportTimezone, root.use24HourTime)
         return formatted.valid ? formatted.formatted : utc
@@ -92,6 +207,7 @@ Item {
             showArchived: root.plasmoidConfiguration.showArchivedTasks
         })
         const categories = Database.listCategories()
+        root.refreshCategoryTimes()
         taskModel.clear()
         categoryModel.clear()
         visibleCategoryModel.clear()
@@ -717,6 +833,9 @@ Item {
                                 categoryName: model.name
                                 categoryColor: model.color
                                 collapsed: model.collapsed !== 0
+                                timeText: root.categoryTimeText(model.id)
+                                showingTotalTime: root.totalTimeCategories[model.id] === true
+                                onTimeDisplayToggleRequested: root.toggleCategoryTimeDisplay(model.id)
                                 onCollapseRequested: {
                                     Database.updateCategory({ id: model.id, collapsed: model.collapsed === 0 })
                                     root.reload()
