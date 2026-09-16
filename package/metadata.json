@@ -15,7 +15,7 @@
             "time tracking",
             "productivity"
         ],
-        "License": "GPL-3.0-or-later",
+        "License": "LGPL-3.0-or-later",
         "Name": "Workbench",
         "Version": "0.1.0"
     },

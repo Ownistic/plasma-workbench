@@ -52,6 +52,15 @@ tasks, tracked time, categories, and reports. This legacy technical identifier i
 not the repository slug; release archives and repository references use
 `plasma-workbench`.
 
+## License
+
+Copyright (C) 2026 OwnisticApps. Workbench is licensed under the
+[GNU Lesser General Public License, version 3 or later](LICENSE).
+The release archive includes the canonical LGPL text, its incorporated GPL
+terms, notices, and the exact corresponding source used to build its native
+module. See
+[SOURCE_OFFER.md](SOURCE_OFFER.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 With `kpackagetool6` available at configure time, run the isolated archive-install smoke test after building the release target:
 
 ```sh

@@ -33,3 +33,17 @@ set(installed_metadata "${PACKAGE_ROOT}/${PLUGIN_ID}/metadata.json")
 if(NOT EXISTS "${installed_metadata}")
     message(FATAL_ERROR "Archive did not install ${installed_metadata}")
 endif()
+
+foreach(required_file IN ITEMS
+    LICENSE
+    NOTICE
+    SOURCE_OFFER.md
+    THIRD_PARTY_NOTICES.md
+    LICENSES/LGPL-3.0-or-later.txt
+    source/CMakeLists.txt
+    source/src/time/timemath.cpp
+)
+    if(NOT EXISTS "${PACKAGE_ROOT}/${PLUGIN_ID}/${required_file}")
+        message(FATAL_ERROR "Archive did not install required compliance file ${required_file}")
+    endif()
+endforeach()

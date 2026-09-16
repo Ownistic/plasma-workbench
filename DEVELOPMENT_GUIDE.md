@@ -232,11 +232,13 @@ ctest --test-dir build -R plasmoid-archive-install --output-on-failure
 Before packaging:
 
 1. Validate `metadata.json` as strict JSON.
-2. Remove development-only logs.
-3. Run repository and report tests.
-4. Test an upgrade from the previous release database.
-5. Install the generated `.plasmoid` file on a clean test account.
-6. Confirm that uninstalling the widget does not unexpectedly delete user task data.
+2. Verify the canonical LGPL text, its incorporated GPL terms, notices, and `source/` directory are included in the archive.
+3. Remove development-only logs.
+4. Run repository and report tests.
+5. Test an upgrade from the previous release database.
+6. Install the generated `.plasmoid` file on a clean test account.
+7. Confirm that uninstalling the widget does not unexpectedly delete user task data.
+8. Confirm OwnisticApps has authority to license every contribution under LGPL-3.0-or-later.
 
 ## 10. Native-backend migration
 

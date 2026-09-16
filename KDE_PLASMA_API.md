@@ -20,7 +20,7 @@ Minimum `metadata.json` structure:
     "Description": "Organize work tasks and track work time.",
     "Icon": "view-task",
     "Id": "com.example.workbench",
-    "License": "GPL-3.0-or-later",
+    "License": "LGPL-3.0-or-later",
     "Name": "Workbench",
     "Version": "0.1.0"
   },

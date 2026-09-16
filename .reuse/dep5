@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Workbench
+
+Files: *
+Copyright: 2026 OwnisticApps
+License: LGPL-3.0-or-later
+
+Files: LICENSE LICENSES/LGPL-3.0-or-later.txt
+Copyright: 2007 Free Software Foundation, Inc.
+License: LGPL-3.0-or-later
+
