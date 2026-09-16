@@ -15,17 +15,20 @@ PlasmaExtras.ListSectionHeader {
     signal editRequested()
     signal deleteRequested()
     signal collapseRequested()
-    signal dragStarted(var dragItem)
+    signal dragStarted(var dragItem, var dragGroup)
+    signal dragPositionChanged(var dragItem)
     signal dragPreviewRequested(string sourceCategoryId, string placement, var targetItem)
     signal dragFinished()
     signal taskPreviewRequested(string taskId, var targetItem)
     signal taskDropped(string taskId)
     signal categoryDropped(string categoryId, string placement)
     readonly property bool dragging: categoryDragHandler.active
+    property var dragGroup: null
     property real dragOriginX: 0
     property real dragOriginY: 0
 
     text: root.categoryName
+    objectName: "category-header-" + root.categoryId
 
     contentItem: RowLayout {
         spacing: Kirigami.Units.smallSpacing
@@ -54,6 +57,7 @@ PlasmaExtras.ListSectionHeader {
 
         PlasmaComponents.ToolButton {
             id: categoryDragHandle
+            objectName: "category-drag-handle-" + root.categoryId
             icon.name: "drag-handle-symbolic"
             Accessible.name: i18n("Drag category %1 to reorder it", root.categoryName)
         }
@@ -98,7 +102,7 @@ PlasmaExtras.ListSectionHeader {
             if (active) {
                 root.dragOriginX = root.x
                 root.dragOriginY = root.y
-                root.dragStarted(root)
+                root.dragStarted(root, root.dragGroup)
             }
             root.opacity = active ? 0 : 1.0
             if (!active) {
@@ -108,6 +112,7 @@ PlasmaExtras.ListSectionHeader {
                 root.dragFinished()
             }
         }
+        onTranslationChanged: root.dragPositionChanged(root)
     }
 
     DropArea {
@@ -120,14 +125,14 @@ PlasmaExtras.ListSectionHeader {
             if (drag.source && drag.source.task) {
                 root.taskPreviewRequested(drag.source.task.taskId, root.parent)
             } else if (drag.source && drag.source.categoryId && drag.source.categoryId !== root.categoryId) {
-                root.dragPreviewRequested(drag.source.categoryId, placementFor(drag), root.parent)
+                root.dragPreviewRequested(drag.source.categoryId, placementFor(drag), root.dragGroup || root.parent)
             }
         }
         onPositionChanged: function(drag) {
             if (drag.source && drag.source.task) {
                 root.taskPreviewRequested(drag.source.task.taskId, root.parent)
             } else if (drag.source && drag.source.categoryId && drag.source.categoryId !== root.categoryId) {
-                root.dragPreviewRequested(drag.source.categoryId, placementFor(drag), root.parent)
+                root.dragPreviewRequested(drag.source.categoryId, placementFor(drag), root.dragGroup || root.parent)
             }
         }
         onDropped: function(drop) {

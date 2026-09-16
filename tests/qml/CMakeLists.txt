@@ -18,6 +18,14 @@ set_tests_properties(DatabaseRepository PROPERTIES
 )
 
 add_test(
+    NAME CategoryDragE2E
+    COMMAND ${QMLTESTRUNNER} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/tst_category_drag.qml
+)
+set_tests_properties(CategoryDragE2E PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+add_test(
     NAME UserReportedUiQmlSyntax
     COMMAND ${QMLLINT} -I ${CMAKE_BINARY_DIR}/qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/main.qml

@@ -27,8 +27,13 @@ Item {
     property var draggedTaskPreviewItem: null
     property string draggedCategoryTargetId: ""
     property string draggedCategoryPlacement: "before"
+    property real draggedCategoryTargetBaseHeight: 0
     property var draggedCategoryItem: null
     property var draggedCategoryData: null
+    property var draggedCategoryTasks: []
+    property real draggedCategoryGroupHeight: 0
+    property real draggedCategoryOverlayX: 0
+    property real draggedCategoryOverlayY: 0
     property var draggedCategoryPreviewItem: null
     property bool taskDropHandled: false
     property bool categoryDropHandled: false
@@ -250,15 +255,41 @@ Item {
         root.reload()
     }
 
-    function beginCategoryDrag(category, dragItem) {
+    function beginCategoryDrag(category, dragItem, dragGroup) {
         root.draggedCategoryId = category.id
         root.draggedCategoryItem = dragItem
         root.draggedCategoryData = category
+        const group = dragGroup || dragItem
+        root.draggedCategoryGroupHeight = Math.max(
+            Number(group.height || 0),
+            Number(group.implicitHeight || 0),
+            Number(group.childrenRect ? group.childrenRect.height : 0),
+            Kirigami.Units.gridUnit * 2
+        )
+        const tasks = []
+        for (let index = 0; index < taskModel.count; index += 1) {
+            const task = taskModel.get(index)
+            if (task.categoryId === category.id && task.categoryCollapsed === 0) {
+                tasks.push({ title: task.title, status: task.status, categoryColor: task.categoryColor })
+            }
+        }
+        root.draggedCategoryTasks = tasks
         root.categoryDropHandled = false
         root.draggedCategoryTargetId = ""
         root.draggedCategoryPlacement = "before"
+        root.draggedCategoryTargetBaseHeight = 0
         root.draggedCategoryPreviewItem = null
         root.moveError = ""
+        root.updateCategoryDragPosition(dragItem)
+    }
+
+    function updateCategoryDragPosition(dragItem) {
+        if (!dragItem) {
+            return
+        }
+        const position = dragItem.mapToItem(root, 0, 0)
+        root.draggedCategoryOverlayX = position.x
+        root.draggedCategoryOverlayY = position.y
     }
 
     function previewCategoryMove(sourceCategoryId, targetCategoryId, placement, previewItem) {
@@ -271,6 +302,13 @@ Item {
         root.draggedCategoryTargetId = targetCategoryId || ""
         root.draggedCategoryPlacement = placement
         root.draggedCategoryPreviewItem = previewItem || null
+    }
+
+    function categoryGroupPlacement(dragY, targetHeight, targetCategoryId) {
+        if (root.draggedCategoryTargetId !== targetCategoryId || root.draggedCategoryTargetBaseHeight <= 0) {
+            root.draggedCategoryTargetBaseHeight = targetHeight
+        }
+        return dragY >= root.draggedCategoryTargetBaseHeight / 2 ? "after" : "before"
     }
 
     function commitCategoryDrop(sourceCategoryId, targetCategoryId, placement) {
@@ -291,8 +329,13 @@ Item {
     function finishCategoryDrag() {
         root.draggedCategoryId = ""
         root.draggedCategoryTargetId = ""
+        root.draggedCategoryTargetBaseHeight = 0
         root.draggedCategoryItem = null
         root.draggedCategoryData = null
+        root.draggedCategoryTasks = []
+        root.draggedCategoryGroupHeight = 0
+        root.draggedCategoryOverlayX = 0
+        root.draggedCategoryOverlayY = 0
         root.draggedCategoryPreviewItem = null
         root.categoryDropHandled = false
         root.reload()
@@ -454,18 +497,27 @@ Item {
                     model: visibleCategoryModel
 
                     delegate: Column {
+                        id: categorySlot
+                        objectName: "category-slot-" + model.id
                         required property var model
                         readonly property string currentCategoryId: model.id
+                        readonly property bool insertionTarget: root.draggedCategoryPreviewItem === categorySlot
+                        readonly property real groupPlaceholderHeight: insertionTarget
+                            ? (root.draggedCategoryGroupHeight || implicitHeight) : 0
                         width: categoryColumn.width
+                        height: categoryHeader.dragging ? 0 : implicitHeight
+                        clip: true
                         spacing: Kirigami.Units.smallSpacing
 
-                        Item {
-                            id: categoryHeaderSlot
+                            Item {
+                                id: categoryHeaderSlot
+                                objectName: "category-placeholder-before-" + model.id
                             width: parent.width
-                            readonly property bool insertionTarget: root.draggedCategoryPreviewItem === categoryHeaderSlot
+                            z: root.draggedCategoryId.length > 0 ? 10 : 0
+                            readonly property bool insertionTarget: categorySlot.insertionTarget && root.draggedCategoryPlacement === "before"
                             readonly property real placeholderHeight: insertionTarget
-                                ? (root.draggedCategoryItem ? root.draggedCategoryItem.implicitHeight : categoryHeader.implicitHeight) : 0
-                            height: categoryHeader.dragging ? 0 : categoryHeader.implicitHeight + placeholderHeight
+                                ? categorySlot.groupPlaceholderHeight : 0
+                            height: categoryHeader.implicitHeight + placeholderHeight
 
                             Rectangle {
                                 width: parent.width
@@ -476,13 +528,27 @@ Item {
                                 opacity: 0.45
                                 radius: Kirigami.Units.smallSpacing
 
-                                PlasmaComponents.Label {
+                                ColumnLayout {
                                     anchors.fill: parent
-                                    anchors.leftMargin: Kirigami.Units.largeSpacing
-                                    verticalAlignment: Text.AlignVCenter
-                                    text: root.draggedCategoryData ? root.draggedCategoryData.name : model.name
-                                    font.bold: true
-                                    elide: Text.ElideRight
+                                    anchors.margins: Kirigami.Units.smallSpacing
+
+                                    PlasmaComponents.Label {
+                                        Layout.fillWidth: true
+                                        text: root.draggedCategoryData ? root.draggedCategoryData.name : model.name
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Repeater {
+                                        model: root.draggedCategoryTasks
+
+                                        delegate: PlasmaComponents.Label {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            text: modelData.title
+                                            elide: Text.ElideRight
+                                        }
+                                    }
                                 }
                             }
 
@@ -495,12 +561,42 @@ Item {
                                 keys: ["application/x-worktodo-category"]
                                 onEntered: function(drag) {
                                     if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
-                                        root.previewCategoryMove(drag.source.categoryId, model.id, root.draggedCategoryPlacement, categoryHeaderSlot)
+                                        root.previewCategoryMove(drag.source.categoryId, model.id, root.draggedCategoryPlacement, categorySlot)
                                     }
                                 }
                                 onDropped: function(drop) {
                                     if (drop.source && drop.source.categoryId && drop.source.categoryId !== model.id) {
                                         root.commitCategoryDrop(drop.source.categoryId, model.id, root.draggedCategoryPlacement)
+                                        drop.acceptProposedAction()
+                                    }
+                                }
+                            }
+
+                            DropArea {
+                                id: categoryGroupDrop
+                                objectName: "category-drop-target-" + model.id
+                                width: categorySlot.width
+                                height: categorySlot.implicitHeight
+                                y: -categoryHeaderSlot.y
+                                visible: root.draggedCategoryId.length > 0 && root.draggedCategoryId !== model.id
+                                z: 2
+                                keys: ["application/x-worktodo-category"]
+                                onEntered: function(drag) {
+                                    if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
+                                        root.previewCategoryMove(drag.source.categoryId, model.id,
+                                            root.categoryGroupPlacement(drag.y, height, model.id), categorySlot)
+                                    }
+                                }
+                                onPositionChanged: function(drag) {
+                                    if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
+                                        root.previewCategoryMove(drag.source.categoryId, model.id,
+                                            root.categoryGroupPlacement(drag.y, height, model.id), categorySlot)
+                                    }
+                                }
+                                onDropped: function(drop) {
+                                    if (drop.source && drop.source.categoryId && drop.source.categoryId !== model.id) {
+                                        root.commitCategoryDrop(drop.source.categoryId, model.id,
+                                            root.draggedCategoryPlacement)
                                         drop.acceptProposedAction()
                                     }
                                 }
@@ -518,6 +614,7 @@ Item {
                             CategoryHeader {
                                 id: categoryHeader
                                 width: parent.width
+                                dragGroup: categorySlot
                                 y: categoryHeaderSlot.insertionTarget && root.draggedCategoryPlacement === "before"
                                     ? categoryHeaderSlot.placeholderHeight : 0
                                 z: dragging ? 2 : 1
@@ -531,8 +628,11 @@ Item {
                                 }
                                 onEditRequested: categoryEditorDialog.openForCategory(model)
                                 onDeleteRequested: categoryDeleteDialog.openForCategory(model)
-                                onDragStarted: function(dragItem) {
-                                    root.beginCategoryDrag(model, dragItem)
+                                onDragStarted: function(dragItem, dragGroup) {
+                                    root.beginCategoryDrag(model, dragItem, dragGroup)
+                                }
+                                onDragPositionChanged: function(dragItem) {
+                                    root.updateCategoryDragPosition(dragItem)
                                 }
                                 onDragPreviewRequested: function(sourceCategoryId, placement, targetItem) {
                                     root.previewCategoryMove(sourceCategoryId, model.id, placement, targetItem)
@@ -545,7 +645,7 @@ Item {
                                     root.commitTaskDrop(taskId, null, model.id, "after")
                                 }
                                 onCategoryDropped: function(categoryId, placement) {
-                                    root.commitCategoryDrop(categoryId, model.id, placement)
+                                    root.commitCategoryDrop(categoryId, model.id, root.draggedCategoryPlacement)
                                 }
                             }
                         }
@@ -654,6 +754,63 @@ Item {
                             }
                         }
 
+                        Item {
+                            id: bottomCategoryPlaceholder
+                            objectName: "category-placeholder-after-" + model.id
+                            readonly property bool insertionTarget: categorySlot.insertionTarget && root.draggedCategoryPlacement === "after"
+                            width: parent.width
+                            height: insertionTarget ? categorySlot.groupPlaceholderHeight : 0
+
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: bottomCategoryPlaceholder.insertionTarget
+                                color: Kirigami.Theme.alternateBackgroundColor
+                                opacity: 0.45
+                                radius: Kirigami.Units.smallSpacing
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: Kirigami.Units.smallSpacing
+
+                                    PlasmaComponents.Label {
+                                        Layout.fillWidth: true
+                                        text: root.draggedCategoryData ? root.draggedCategoryData.name : model.name
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Repeater {
+                                        model: root.draggedCategoryTasks
+
+                                        delegate: PlasmaComponents.Label {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            text: modelData.title
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+                            }
+
+                            DropArea {
+                                anchors.fill: parent
+                                visible: bottomCategoryPlaceholder.insertionTarget
+                                z: 3
+                                keys: ["application/x-worktodo-category"]
+                                onEntered: function(drag) {
+                                    if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
+                                        root.previewCategoryMove(drag.source.categoryId, model.id, "after", categorySlot)
+                                    }
+                                }
+                                onDropped: function(drop) {
+                                    if (drop.source && drop.source.categoryId && drop.source.categoryId !== model.id) {
+                                        root.commitCategoryDrop(drop.source.categoryId, model.id, "after")
+                                        drop.acceptProposedAction()
+                                    }
+                                }
+                            }
+                        }
+
                     }
                 }
 
@@ -667,7 +824,7 @@ Item {
                         width: parent.width
                         height: hiddenDestination && (root.draggedTaskId.length > 0 || root.draggedCategoryId.length > 0)
                             ? (root.draggedTaskItem ? root.draggedTaskItem.implicitHeight
-                                : (root.draggedCategoryItem ? root.draggedCategoryItem.implicitHeight : Kirigami.Units.gridUnit * 2)) : 0
+                                : (root.draggedCategoryGroupHeight || Kirigami.Units.gridUnit * 2)) : 0
                         keys: ["application/x-worktodo-task", "application/x-worktodo-category"]
                         onEntered: function(drag) {
                             if (drag.source && drag.source.task) {
@@ -708,15 +865,20 @@ Item {
 
     Item {
         id: dragOverlay
+        objectName: "drag-overlay"
         readonly property var sourceItem: root.draggedTaskItem || root.draggedCategoryItem
         readonly property bool draggingTask: root.draggedTaskItem !== null
+        readonly property bool active: draggingTask ? sourceItem !== null : root.draggedCategoryId.length > 0
         z: 100
-        visible: sourceItem !== null
+        visible: active
         width: sourceItem ? sourceItem.width : 0
-        height: sourceItem ? sourceItem.height : 0
+        height: draggingTask ? (sourceItem ? sourceItem.height : 0) : root.draggedCategoryGroupHeight
         x: {
             if (!sourceItem) {
                 return 0
+            }
+            if (!dragOverlay.draggingTask) {
+                return root.draggedCategoryOverlayX
             }
             sourceItem.x
             sourceItem.y
@@ -725,6 +887,9 @@ Item {
         y: {
             if (!sourceItem) {
                 return 0
+            }
+            if (!dragOverlay.draggingTask) {
+                return root.draggedCategoryOverlayY
             }
             sourceItem.x
             sourceItem.y
@@ -741,6 +906,7 @@ Item {
 
             RowLayout {
                 anchors.fill: parent
+                visible: dragOverlay.draggingTask
                 anchors.leftMargin: Kirigami.Units.largeSpacing
                 anchors.rightMargin: Kirigami.Units.largeSpacing
                 spacing: Kirigami.Units.smallSpacing
@@ -760,6 +926,68 @@ Item {
                     font.bold: true
                     elide: Text.ElideRight
                 }
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                visible: !dragOverlay.draggingTask
+                spacing: Kirigami.Units.smallSpacing
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Kirigami.Units.gridUnit * 2
+                    Layout.leftMargin: Kirigami.Units.largeSpacing
+                    Layout.rightMargin: Kirigami.Units.largeSpacing
+
+                    Rectangle {
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: Kirigami.Units.smallSpacing
+                        color: root.draggedCategoryData ? root.draggedCategoryData.color : Kirigami.Theme.highlightColor
+                        radius: width / 2
+                    }
+
+                    PlasmaComponents.Label {
+                        Layout.fillWidth: true
+                        text: root.draggedCategoryData ? root.draggedCategoryData.name : ""
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Repeater {
+                    model: root.draggedCategoryTasks
+
+                    delegate: Rectangle {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: Kirigami.Units.gridUnit * 3
+                        Layout.leftMargin: Kirigami.Units.largeSpacing
+                        Layout.rightMargin: Kirigami.Units.largeSpacing
+                        color: Kirigami.Theme.backgroundColor
+                        radius: Kirigami.Units.smallSpacing
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: Kirigami.Units.smallSpacing
+                            anchors.rightMargin: Kirigami.Units.smallSpacing
+
+                            Rectangle {
+                                Layout.fillHeight: true
+                                Layout.preferredWidth: Kirigami.Units.smallSpacing
+                                color: modelData.categoryColor
+                                radius: width / 2
+                            }
+
+                            PlasmaComponents.Label {
+                                Layout.fillWidth: true
+                                text: modelData.title
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+                }
+
+                Item { Layout.fillHeight: true }
             }
         }
     }
