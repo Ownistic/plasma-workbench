@@ -19,6 +19,9 @@
         <entry name="use24HourTime" type="Bool">
             <default>true</default>
         </entry>
+        <entry name="allowConcurrentTimers" type="Bool">
+            <default>false</default>
+        </entry>
         <entry name="unusualSessionHours" type="Int">
             <default>16</default>
         </entry>

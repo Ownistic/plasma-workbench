@@ -20,8 +20,8 @@ TestCase {
             Migrations.apply(tx, "2026-01-02T00:00:00.000Z")
 
             const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
-            compare(versions.rows.length, 5)
-            compare(versions.rows.item(4).version, 5)
+            compare(versions.rows.length, 6)
+            compare(versions.rows.item(5).version, 6)
             const categoryColumns = tx.executeSql("PRAGMA table_info(categories)")
             let hasTrashColumn = false
             for (let index = 0; index < categoryColumns.rows.length; index += 1) {
@@ -40,6 +40,8 @@ TestCase {
                 hasTrackedSecondsColumn = hasTrackedSecondsColumn || taskColumns.rows.item(index).name === "tracked_seconds"
             }
             verify(hasTrackedSecondsColumn)
+            const activeTimerIndex = tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'one_active_work_session_idx'")
+            compare(activeTimerIndex.rows.length, 0)
         })
     }
 }

@@ -20,20 +20,31 @@ TestCase {
         property bool use24HourTime: true
         property int unusualSessionHours: 16
         property bool showArchivedTasks: false
+        property bool allowConcurrentTimers: false
         property string defaultStatusFilter: "backlog,ready,in_progress,blocked,completed"
     }
 
     QtObject {
         id: testPlasmoidRoot
-        property var activeSession: null
-        property bool hasActiveSession: false
+        property var activeSessions: []
+        property var activeSession: activeSessions.length > 0 ? activeSessions[0] : null
+        property bool hasActiveSession: activeSessions.length > 0
         property string activeElapsedText: ""
+        property string activeTaskSummary: "No active timer"
         property int elapsedRefresh: 0
         function formatSeconds(seconds) {
             return "00:00:00"
         }
         function elapsedSeconds(utc) {
             return 0
+        }
+        function isTaskActive(taskId) {
+            for (let index = 0; index < activeSessions.length; index += 1) {
+                if (activeSessions[index].task_id === taskId) {
+                    return true
+                }
+            }
+            return false
         }
     }
 
@@ -57,6 +68,8 @@ TestCase {
 
     function init() {
         databaseNumber += 1
+        testConfiguration.allowConcurrentTimers = false
+        testPlasmoidRoot.activeSessions = []
         Database.configureDatabaseForTests("worktodo-category-drag-" + Date.now() + "-" + databaseNumber)
         Database.setTimeZoneValidator(function(timezoneId) {
             return WorkTodoTime.TimeMath.isValidTimeZone(timezoneId)
@@ -128,5 +141,32 @@ TestCase {
         const reorderedCategories = Database.listCategories()
         compare(reorderedCategories[0].id, secondCategory.id)
         compare(reorderedCategories[1].id, firstCategory.id)
+    }
+
+    function test_settingsAndConcurrentTimerResolution() {
+        const settings = findChild(board, "settings-page")
+        const tasks = Database.listTasks({ statuses: ["ready"] })
+        verify(settings !== null)
+        compare(board.currentPage, "board")
+
+        board.openSettings()
+        compare(board.currentPage, "settings")
+        board.closeSettings()
+        compare(board.currentPage, "board")
+
+        testConfiguration.allowConcurrentTimers = true
+        Database.startTimer(tasks[0].taskId, "Etc/UTC", "2026-09-15T09:00:00.000Z", true)
+        Database.startTimer(tasks[1].taskId, "Etc/UTC", "2026-09-15T09:01:00.000Z", true)
+        board.reload()
+        compare(board.activeSessions.length, 2)
+
+        board.requestConcurrentTimersChange(false)
+        compare(board.keepActiveTaskId, tasks[0].taskId)
+        board.keepActiveTaskId = tasks[1].taskId
+        board.resolveConcurrentTimerConflict()
+        compare(testConfiguration.allowConcurrentTimers, false)
+        const active = Database.getActiveSessions()
+        compare(active.length, 1)
+        compare(active[0].task_id, tasks[1].taskId)
     }
 }

@@ -11,9 +11,13 @@ Item {
     PlasmaComponents.Label {
         id: contentLabel
         anchors.centerIn: parent
-        text: root.plasmoidRoot.hasActiveSession ? root.plasmoidRoot.activeElapsedText : i18n("Tasks")
+        text: root.plasmoidRoot.hasActiveSession
+            ? (root.plasmoidRoot.activeSessions.length === 1
+                ? root.plasmoidRoot.activeElapsedText
+                : i18np("%1 timer", "%1 timers", root.plasmoidRoot.activeSessions.length))
+            : i18n("Tasks")
         Accessible.name: root.plasmoidRoot.hasActiveSession
-            ? i18n("Active timer: %1", root.plasmoidRoot.activeElapsedText)
+            ? root.plasmoidRoot.activeTaskSummary
             : i18n("Open Work Todo")
     }
 

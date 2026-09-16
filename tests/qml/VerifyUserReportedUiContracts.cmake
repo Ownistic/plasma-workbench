@@ -12,6 +12,9 @@ read_source("package/contents/ui/TaskCard.qml" task_card)
 read_source("package/contents/ui/CategoryHeader.qml" category_header)
 read_source("package/contents/ui/TaskDetails.qml" task_details)
 read_source("package/contents/ui/ReportsView.qml" reports_view)
+read_source("package/contents/ui/SettingsPage.qml" settings_page)
+read_source("package/contents/ui/ConfigGeneral.qml" config_general)
+read_source("package/contents/config/main.xml" config_xml)
 
 # Dialog enum assignments caused the widget to fail loading before any action
 # could be used. Zero is not a valid QML enum assignment for standardButtons.
@@ -99,4 +102,19 @@ if(NOT todo_board MATCHES "draggedCategoryTasks" OR NOT todo_board MATCHES "drag
 endif()
 if(NOT todo_board MATCHES "category-drop-target-" OR NOT todo_board MATCHES "height: categorySlot\\.implicitHeight")
     message(FATAL_ERROR "Category drops must cover the complete destination group, including its task cards")
+endif()
+
+# Concurrent timers are disabled by default, configured from either settings
+# surface, and resolved explicitly before reducing multiple active timers.
+if(NOT config_xml MATCHES "entry name=\"allowConcurrentTimers\" type=\"Bool\"" OR NOT config_xml MATCHES "<default>false</default>")
+    message(FATAL_ERROR "Concurrent timers must be a persisted preference disabled by default")
+endif()
+if(NOT config_general MATCHES "cfg_allowConcurrentTimers" OR NOT settings_page MATCHES "allowConcurrentTimers")
+    message(FATAL_ERROR "Both settings surfaces must expose the concurrent timer preference")
+endif()
+if(NOT todo_board MATCHES "function requestConcurrentTimersChange" OR NOT todo_board MATCHES "stopTimersExcept" OR NOT todo_board MATCHES "concurrent-timer-resolution" OR NOT todo_board MATCHES "Controls\.Popup\.NoAutoClose")
+    message(FATAL_ERROR "Disabling concurrent timers must require explicit active-timer resolution")
+endif()
+if(NOT todo_board MATCHES "getActiveSessions" OR NOT todo_board MATCHES "isTaskActive" OR NOT task_details MATCHES "board\.isTaskActive")
+    message(FATAL_ERROR "Timer UI must support task-scoped concurrent active sessions")
 endif()

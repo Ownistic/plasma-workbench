@@ -11,6 +11,7 @@ Item {
     property alias cfg_defaultStatusFilter: defaultStatuses.text
     property alias cfg_showArchivedTasks: showArchived.checked
     property alias cfg_use24HourTime: use24HourTime.checked
+    property alias cfg_allowConcurrentTimers: allowConcurrentTimers.checked
     property alias cfg_unusualSessionHours: unusualSessionHours.value
 
     implicitWidth: form.implicitWidth
@@ -51,6 +52,11 @@ Item {
         PlasmaComponents.CheckBox {
             id: use24HourTime
             text: i18n("Use 24-hour time")
+        }
+
+        PlasmaComponents.CheckBox {
+            id: allowConcurrentTimers
+            text: i18n("Allow multiple timers to run at the same time")
         }
 
         PlasmaComponents.SpinBox {

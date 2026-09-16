@@ -37,6 +37,8 @@ Item {
     property var draggedCategoryPreviewItem: null
     property bool taskDropHandled: false
     property bool categoryDropHandled: false
+    property string keepActiveTaskId: ""
+    readonly property var activeSessions: root.plasmoidRoot.activeSessions
     readonly property var activeSession: root.plasmoidRoot.activeSession
     readonly property bool hasActiveSession: root.plasmoidRoot.hasActiveSession
     readonly property string activeElapsedText: root.plasmoidRoot.activeElapsedText
@@ -47,6 +49,7 @@ Item {
         && root.plasmoidConfiguration.firstDayOfWeek <= 7 ? root.plasmoidConfiguration.firstDayOfWeek : 1
     readonly property bool use24HourTime: root.plasmoidConfiguration.use24HourTime !== false
     readonly property int unusualSessionHours: Math.max(1, Number(root.plasmoidConfiguration.unusualSessionHours || 16))
+    readonly property bool allowConcurrentTimers: root.plasmoidConfiguration.allowConcurrentTimers === true
 
     ListModel { id: taskModel }
     ListModel { id: categoryModel }
@@ -99,7 +102,11 @@ Item {
         for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
             taskModel.append(tasks[taskIndex])
         }
-        root.plasmoidRoot.activeSession = Database.getActiveSession()
+        root.plasmoidRoot.activeSessions = Database.getActiveSessions()
+        if (!root.allowConcurrentTimers && root.activeSessions.length > 1 && !concurrentTimerResolutionDialog.visible) {
+            root.keepActiveTaskId = root.activeSessions[0].task_id
+            concurrentTimerResolutionDialog.open()
+        }
     }
 
     function toggleStatus(status) {
@@ -115,12 +122,74 @@ Item {
     }
 
     function toggleTimer(task) {
-        if (root.plasmoidRoot.activeSession && root.plasmoidRoot.activeSession.task_id === task.taskId) {
+        if (root.plasmoidRoot.isTaskActive(task.taskId)) {
             Database.stopTimer(task.taskId)
         } else {
-            Database.startTimer(task.taskId, root.reportTimezone)
+            Database.startTimer(task.taskId, root.reportTimezone, undefined, root.allowConcurrentTimers)
         }
         root.reload()
+    }
+
+    function isTaskActive(taskId) {
+        return root.plasmoidRoot.isTaskActive(taskId)
+    }
+
+    function openSettings() {
+        root.currentPage = "settings"
+    }
+
+    function closeSettings() {
+        root.currentPage = "board"
+    }
+
+    function requestConcurrentTimersChange(enabled) {
+        if (enabled) {
+            root.plasmoidConfiguration.allowConcurrentTimers = true
+            root.reload()
+            return
+        }
+        if (root.activeSessions.length <= 1) {
+            root.plasmoidConfiguration.allowConcurrentTimers = false
+            root.reload()
+            return
+        }
+        root.keepActiveTaskId = root.activeSessions[0].task_id
+        concurrentTimerResolutionDialog.open()
+    }
+
+    function resolveConcurrentTimerConflict() {
+        try {
+            Database.stopTimersExcept(root.keepActiveTaskId)
+            root.plasmoidConfiguration.allowConcurrentTimers = false
+            concurrentTimerResolutionDialog.close()
+            root.reload()
+        } catch (error) {
+            root.moveError = error.message
+            moveErrorTimer.restart()
+            root.reload()
+            if (root.activeSessions.length <= 1) {
+                concurrentTimerResolutionDialog.close()
+            } else {
+                root.keepActiveTaskId = root.activeSessions[0].task_id
+            }
+        }
+    }
+
+    function cancelConcurrentTimerResolution() {
+        root.plasmoidConfiguration.allowConcurrentTimers = true
+        concurrentTimerResolutionDialog.close()
+        root.reload()
+    }
+
+    function isActiveTimerSelection(taskId) {
+        return root.activeSessions.some(function(session) { return session.task_id === taskId })
+    }
+
+    onAllowConcurrentTimersChanged: {
+        if (!root.allowConcurrentTimers && root.activeSessions.length > 1 && !concurrentTimerResolutionDialog.visible) {
+            root.keepActiveTaskId = root.activeSessions[0].task_id
+            concurrentTimerResolutionDialog.open()
+        }
     }
 
     function adjacentTask(task, direction) {
@@ -391,7 +460,10 @@ Item {
             }
 
             PlasmaComponents.Label {
-                text: root.hasActiveSession ? root.activeElapsedText : i18n("No timer")
+                text: root.hasActiveSession
+                    ? (root.activeSessions.length === 1 ? root.activeElapsedText
+                        : i18np("%1 timer", "%1 timers", root.activeSessions.length))
+                    : i18n("No timer")
                 Accessible.name: root.activeTaskSummary
             }
 
@@ -423,6 +495,13 @@ Item {
                 icon.name: "office-chart-bar"
                 Accessible.name: i18n("Open reports")
                 onClicked: reportsDialog.openReport(false)
+            }
+
+            PlasmaComponents.ToolButton {
+                objectName: "settings-button"
+                icon.name: "configure"
+                Accessible.name: i18n("Open settings")
+                onClicked: root.openSettings()
             }
         }
 
@@ -731,7 +810,7 @@ Item {
                                     z: dragging ? 2 : 1
                                     opacity: dragging ? 0 : 1
                                     task: model
-                                    active: root.activeSession && root.activeSession.task_id === model.taskId
+                                    active: root.isTaskActive(model.taskId)
                                     elapsedText: root.taskElapsedText(model)
                                     canMoveUp: root.adjacentTask(model, -1) !== null
                                     canMoveDown: root.adjacentTask(model, 1) !== null
@@ -988,6 +1067,62 @@ Item {
                 }
 
                 Item { Layout.fillHeight: true }
+            }
+        }
+    }
+
+    SettingsPage {
+        id: settingsPage
+        anchors.fill: parent
+        visible: root.currentPage === "settings"
+        board: root
+        plasmoidConfiguration: root.plasmoidConfiguration
+        onBackRequested: root.closeSettings()
+    }
+
+    Controls.Dialog {
+        id: concurrentTimerResolutionDialog
+        objectName: "concurrent-timer-resolution"
+        parent: root
+        modal: true
+        closePolicy: Controls.Popup.NoAutoClose
+        title: i18n("Keep one active timer")
+        width: Math.min(root.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 28)
+        anchors.centerIn: parent
+        onRejected: root.cancelConcurrentTimerResolution()
+
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: i18n("Turning off multiple timers stops every active timer except the one you choose.")
+                wrapMode: Text.Wrap
+            }
+
+            Repeater {
+                model: root.activeSessions
+
+                delegate: Controls.RadioButton {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    checked: root.keepActiveTaskId === modelData.task_id
+                    text: i18n("Keep tracking %1", modelData.taskTitle)
+                    onClicked: root.keepActiveTaskId = modelData.task_id
+                }
+            }
+        }
+
+        footer: Controls.DialogButtonBox {
+            PlasmaComponents.Button {
+                text: i18n("Keep selected timer")
+                enabled: root.isActiveTimerSelection(root.keepActiveTaskId)
+                onClicked: root.resolveConcurrentTimerConflict()
+            }
+
+            PlasmaComponents.Button {
+                text: i18n("Cancel")
+                onClicked: root.cancelConcurrentTimerResolution()
             }
         }
     }

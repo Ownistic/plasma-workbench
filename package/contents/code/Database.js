@@ -140,10 +140,6 @@ function initialize() {
         tx.executeSql("PRAGMA foreign_keys = ON")
         Migrations.apply(tx, nowUtc())
         purgeExpiredTrashInTransaction(tx, nowUtc())
-        const active = tx.executeSql("SELECT COUNT(*) AS count FROM work_sessions WHERE ended_at_utc IS NULL")
-        if (active.rows.item(0).count > 1) {
-            fail("The database contains more than one active work session.")
-        }
     })
     initialized = true
 }
@@ -214,8 +210,15 @@ function taskById(tx, taskId) {
     return task
 }
 
+function activeSessions(tx) {
+    return rows(tx.executeSql(
+        "SELECT * FROM work_sessions WHERE ended_at_utc IS NULL ORDER BY started_at_utc, id"
+    ))
+}
+
 function activeSession(tx) {
-    return first(tx.executeSql("SELECT * FROM work_sessions WHERE ended_at_utc IS NULL"))
+    const sessions = activeSessions(tx)
+    return sessions.length > 0 ? sessions[0] : null
 }
 
 function nextStatusSequence(tx, taskId) {
@@ -231,7 +234,7 @@ function assertSessionCanEnd(tx, session, endedAtUtc) {
     if (endedAtUtc < session.started_at_utc) {
         fail("The end time cannot be before the start time.")
     }
-    if (hasSessionOverlap(tx, session.started_at_utc, endedAtUtc, session.id)) {
+    if (hasManualSessionOverlap(tx, session.started_at_utc, endedAtUtc, session.id)) {
         fail("The work session would overlap another session.")
     }
 }
@@ -260,6 +263,17 @@ function closeActiveSessionForTask(tx, taskId, endedAtUtc) {
         [taskId]
     ))
     return session ? closeSession(tx, session, endedAtUtc) : null
+}
+
+function stopTimersExceptInTransaction(tx, taskId, stoppedAtUtc) {
+    const active = activeSessions(tx)
+    const stopped = []
+    for (let index = 0; index < active.length; index += 1) {
+        if (active[index].task_id !== taskId) {
+            stopped.push(closeSession(tx, active[index], stoppedAtUtc))
+        }
+    }
+    return stopped
 }
 
 function nextPosition(tx, tableName, whereClause, parameters) {
@@ -711,26 +725,41 @@ function getActiveSession() {
     return read(function(tx) {
         return first(tx.executeSql(
             "SELECT work_sessions.*, tasks.title AS taskTitle FROM work_sessions JOIN tasks ON tasks.id = work_sessions.task_id " +
-            "WHERE work_sessions.ended_at_utc IS NULL"
+            "WHERE work_sessions.ended_at_utc IS NULL ORDER BY work_sessions.started_at_utc, work_sessions.id"
         ))
     })
 }
 
-function startTimer(taskId, timezoneId, startedAtUtc) {
+function getActiveSessions() {
+    return read(function(tx) {
+        return rows(tx.executeSql(
+            "SELECT work_sessions.*, tasks.title AS taskTitle FROM work_sessions JOIN tasks ON tasks.id = work_sessions.task_id " +
+            "WHERE work_sessions.ended_at_utc IS NULL ORDER BY work_sessions.started_at_utc, work_sessions.id"
+        ))
+    })
+}
+
+function startTimer(taskId, timezoneId, startedAtUtc, allowConcurrentTimers) {
     taskId = requireId(taskId, "Task ID")
     timezoneId = requireTimezoneId(timezoneId)
     const timestamp = requireUtcInstant(startedAtUtc || nowUtc(), "Start time")
+    const allowConcurrent = allowConcurrentTimers === true
     return write(function(tx) {
         taskById(tx, taskId)
-        const active = activeSession(tx)
-        if (active && active.task_id === taskId) {
-            return active
+        const active = activeSessions(tx)
+        for (let index = 0; index < active.length; index += 1) {
+            if (active[index].task_id === taskId) {
+                if (!allowConcurrent) {
+                    stopTimersExceptInTransaction(tx, taskId, timestamp)
+                }
+                return active[index]
+            }
         }
-        if (active) {
-            closeSession(tx, active, timestamp)
-        }
-        if (hasSessionOverlap(tx, timestamp, "9999-12-31T23:59:59.999Z", null)) {
+        if (hasEndedSessionOverlap(tx, timestamp, "9999-12-31T23:59:59.999Z", null)) {
             fail("The active timer would overlap another session.")
+        }
+        if (!allowConcurrent) {
+            stopTimersExceptInTransaction(tx, taskId, timestamp)
         }
         const session = {
             id: newId(), taskId: taskId, startedAtUtc: timestamp, endedAtUtc: null,
@@ -746,13 +775,22 @@ function startTimer(taskId, timezoneId, startedAtUtc) {
 }
 
 function stopTimer(taskId, stoppedAtUtc) {
+    taskId = requireId(taskId, "Task ID")
     const timestamp = requireUtcInstant(stoppedAtUtc || nowUtc(), "End time")
     return write(function(tx) {
-        const active = activeSession(tx)
-        if (!active || (taskId && active.task_id !== taskId)) {
-            return null
+        return closeActiveSessionForTask(tx, taskId, timestamp)
+    })
+}
+
+function stopTimersExcept(taskId, stoppedAtUtc) {
+    taskId = requireId(taskId, "Task ID")
+    const timestamp = requireUtcInstant(stoppedAtUtc || nowUtc(), "End time")
+    return write(function(tx) {
+        taskById(tx, taskId)
+        if (!first(tx.executeSql("SELECT 1 FROM work_sessions WHERE task_id = ? AND ended_at_utc IS NULL", [taskId]))) {
+            fail("The selected timer is no longer active.")
         }
-        return closeSession(tx, active, timestamp)
+        return stopTimersExceptInTransaction(tx, taskId, timestamp)
     })
 }
 
@@ -767,6 +805,26 @@ function listWorkSessions(taskId) {
 
 function hasSessionOverlap(tx, startedAtUtc, endedAtUtc, excludedSessionId) {
     let statement = "SELECT 1 FROM work_sessions WHERE started_at_utc < ? AND COALESCE(ended_at_utc, '9999-12-31T23:59:59.999Z') > ?"
+    const parameters = [endedAtUtc, startedAtUtc]
+    if (excludedSessionId) {
+        statement += " AND id <> ?"
+        parameters.push(excludedSessionId)
+    }
+    return first(tx.executeSql(statement, parameters)) !== null
+}
+
+function hasEndedSessionOverlap(tx, startedAtUtc, endedAtUtc, excludedSessionId) {
+    let statement = "SELECT 1 FROM work_sessions WHERE ended_at_utc IS NOT NULL AND started_at_utc < ? AND ended_at_utc > ?"
+    const parameters = [endedAtUtc, startedAtUtc]
+    if (excludedSessionId) {
+        statement += " AND id <> ?"
+        parameters.push(excludedSessionId)
+    }
+    return first(tx.executeSql(statement, parameters)) !== null
+}
+
+function hasManualSessionOverlap(tx, startedAtUtc, endedAtUtc, excludedSessionId) {
+    let statement = "SELECT 1 FROM work_sessions WHERE manually_edited = 1 AND started_at_utc < ? AND ended_at_utc > ?"
     const parameters = [endedAtUtc, startedAtUtc]
     if (excludedSessionId) {
         statement += " AND id <> ?"

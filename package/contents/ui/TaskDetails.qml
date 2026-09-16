@@ -526,7 +526,7 @@ FocusScope {
                 }
 
                 PlasmaComponents.Button {
-                    text: root.task && root.board.activeSession && root.board.activeSession.task_id === root.taskId
+                    text: root.task && root.board.isTaskActive(root.taskId)
                         ? i18n("Pause") : i18n("Start")
                     onClicked: {
                         root.board.toggleTimer({ taskId: root.taskId })

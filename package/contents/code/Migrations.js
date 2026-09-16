@@ -1,6 +1,6 @@
 .pragma library
 
-const CURRENT_VERSION = 5
+const CURRENT_VERSION = 6
 
 const migrations = [
     {
@@ -92,6 +92,12 @@ const migrations = [
         statements: [
             "ALTER TABLE tasks ADD COLUMN tracked_seconds INTEGER NOT NULL DEFAULT 0",
             "UPDATE tasks SET tracked_seconds = COALESCE((SELECT SUM(strftime('%s', ended_at_utc) - strftime('%s', started_at_utc)) FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NOT NULL), 0)"
+        ]
+    },
+    {
+        version: 6,
+        statements: [
+            "DROP INDEX IF EXISTS one_active_work_session_idx"
         ]
     }
 ]

@@ -11,15 +11,32 @@ PlasmoidItem {
     implicitHeight: Kirigami.Units.gridUnit * 38
     switchWidth: Kirigami.Units.gridUnit * 18
     switchHeight: Kirigami.Units.gridUnit * 18
-    property var activeSession: null
+    property var activeSessions: []
     property int elapsedRefresh: 0
-    readonly property bool hasActiveSession: activeSession !== null
+    readonly property bool hasActiveSession: activeSessions.length > 0
+    readonly property var activeSession: hasActiveSession ? activeSessions[0] : null
     readonly property string activeElapsedText: {
         elapsedRefresh
         return hasActiveSession ? formatSeconds(elapsedSeconds(activeSession.started_at_utc)) : ""
     }
     readonly property string activeTaskSummary: hasActiveSession
-        ? i18n("Tracking %1", activeElapsedText) : i18n("No active timer")
+        ? (activeSessions.length === 1
+            ? i18n("Tracking %1", activeElapsedText)
+            : i18np("Tracking %1 task", "Tracking %1 tasks", activeSessions.length))
+        : i18n("No active timer")
+
+    function activeSessionForTask(taskId) {
+        for (let index = 0; index < activeSessions.length; index += 1) {
+            if (activeSessions[index].task_id === taskId) {
+                return activeSessions[index]
+            }
+        }
+        return null
+    }
+
+    function isTaskActive(taskId) {
+        return activeSessionForTask(taskId) !== null
+    }
 
     function formatSeconds(seconds) {
         const safeSeconds = Math.max(0, Math.floor(seconds))

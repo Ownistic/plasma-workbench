@@ -103,6 +103,86 @@ TestCase {
         compare(Database.getTask(second.id).status, "completed")
     }
 
+    function test_concurrentTimersCanBeStoppedIndependently() {
+        const category = createCategory("Product")
+        const first = createTask(category.id, "First task")
+        const second = createTask(category.id, "Second task")
+
+        const firstSession = Database.startTimer(first.id, "Etc/UTC", "2026-09-14T10:00:00.000Z", true)
+        const secondSession = Database.startTimer(second.id, "Etc/UTC", "2026-09-14T10:05:00.000Z", true)
+        const active = Database.getActiveSessions()
+        compare(active.length, 2)
+        compare(active[0].id, firstSession.id)
+        compare(active[0].taskTitle, "First task")
+        compare(active[1].id, secondSession.id)
+        compare(active[1].taskTitle, "Second task")
+
+        compare(Database.startTimer(second.id, "Etc/UTC", "2026-09-14T10:10:00.000Z", true).id, secondSession.id)
+        compare(Database.stopTimer(first.id, "2026-09-14T10:30:00.000Z").id, firstSession.id)
+        compare(Database.getActiveSessions().length, 1)
+        compare(Database.getActiveSessions()[0].id, secondSession.id)
+        compare(Database.listWorkSessions(first.id)[0].ended_at_utc, "2026-09-14T10:30:00.000Z")
+    }
+
+    function test_singleTimerModeStopsConcurrentTimersAndStopExceptIsAtomic() {
+        const category = createCategory("Product")
+        const first = createTask(category.id, "First task")
+        const second = createTask(category.id, "Second task")
+        const third = createTask(category.id, "Third task")
+
+        Database.startTimer(first.id, "Etc/UTC", "2026-09-14T10:00:00.000Z", true)
+        Database.startTimer(second.id, "Etc/UTC", "2026-09-14T10:05:00.000Z", true)
+        Database.startTimer(third.id, "Etc/UTC", "2026-09-14T10:30:00.000Z")
+        let active = Database.getActiveSessions()
+        compare(active.length, 1)
+        compare(active[0].task_id, third.id)
+        compare(Database.listWorkSessions(first.id)[0].ended_at_utc, "2026-09-14T10:30:00.000Z")
+        compare(Database.listWorkSessions(second.id)[0].ended_at_utc, "2026-09-14T10:30:00.000Z")
+
+        Database.startTimer(first.id, "Etc/UTC", "2026-09-14T11:00:00.000Z", true)
+        Database.startTimer(second.id, "Etc/UTC", "2026-09-14T11:05:00.000Z", true)
+        const stopped = Database.stopTimersExcept(first.id, "2026-09-14T11:30:00.000Z")
+        compare(stopped.length, 2)
+        active = Database.getActiveSessions()
+        compare(active.length, 1)
+        compare(active[0].task_id, first.id)
+        compare(Database.listWorkSessions(second.id)[0].ended_at_utc, "2026-09-14T11:30:00.000Z")
+        compare(Database.listWorkSessions(third.id)[0].ended_at_utc, "2026-09-14T11:30:00.000Z")
+    }
+
+    function test_stopTimersExceptRejectsInactiveKeeperWithoutStoppingTimers() {
+        const category = createCategory("Product")
+        const first = createTask(category.id, "First task")
+        const second = createTask(category.id, "Second task")
+        Database.startTimer(first.id, "Etc/UTC", "2026-09-14T10:00:00.000Z", true)
+        Database.startTimer(second.id, "Etc/UTC", "2026-09-14T10:01:00.000Z", true)
+        Database.stopTimer(first.id, "2026-09-14T10:02:00.000Z")
+
+        assertThrows(function() {
+            Database.stopTimersExcept(first.id, "2026-09-14T10:03:00.000Z")
+        }, "no longer active")
+
+        const active = Database.getActiveSessions()
+        compare(active.length, 1)
+        compare(active[0].task_id, second.id)
+    }
+
+    function test_manualSessionRejectsOverlapWithConcurrentTimer() {
+        const category = createCategory("Product")
+        const timerTask = createTask(category.id, "Timer task")
+        const manualTask = createTask(category.id, "Manual task")
+        Database.startTimer(timerTask.id, "Etc/UTC", "2026-09-14T10:00:00.000Z", true)
+
+        assertThrows(function() {
+            Database.createWorkSession({
+                taskId: manualTask.id,
+                startedAtUtc: "2026-09-14T10:15:00.000Z",
+                endedAtUtc: "2026-09-14T10:30:00.000Z",
+                timezoneId: "Etc/UTC"
+            })
+        }, "cannot overlap")
+    }
+
     function test_filteredMoveUsesStableTaskIds() {
         const product = createCategory("Product")
         const operations = createCategory("Operations")
