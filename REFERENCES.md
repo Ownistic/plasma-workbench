@@ -72,7 +72,7 @@ Documents list delegates, sections, transitions, reuse, model roles, and the req
 
 ### [Dynamic view ordering tutorial](https://doc.qt.io/qt-6/qtquick-tutorials-dynamicview-dynamicview3-example.html)
 
-Shows drag reordering with `Drag`, `DropArea`, and `DelegateModel`. The example changes visual order only. Work Todo must also persist source-model order.
+Shows drag reordering with `Drag`, `DropArea`, and `DelegateModel`. The example changes visual order only. Workbench must also persist source-model order.
 
 ### [`Drag` attached property](https://doc.qt.io/qt-6/qml-qtquick-drag.html)
 

@@ -18,7 +18,7 @@ Item {
             : i18n("Tasks")
         Accessible.name: root.plasmoidRoot.hasActiveSession
             ? root.plasmoidRoot.activeTaskSummary
-            : i18n("Open Work Todo")
+            : i18n("Open Workbench")
     }
 
     MouseArea {

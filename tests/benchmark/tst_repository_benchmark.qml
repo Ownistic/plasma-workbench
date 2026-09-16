@@ -5,13 +5,13 @@ import QtTest
 import "../../package/contents/code/Database.js" as Database
 import "../../package/contents/code/Migrations.js" as Migrations
 import "../../package/contents/code/Reports.js" as Reports
-import "../../package/contents/ui/time" as WorkTodoTime
+import "../../package/contents/ui/time" as WorkbenchTime
 
 TestCase {
     name: "RepositoryBenchmark"
 
     function test_scaleTargets() {
-        const name = "worktodo-benchmark-" + Date.now()
+        const name = "workbench-benchmark-" + Date.now()
         const database = Sql.LocalStorage.openDatabaseSync(name, "1.0", "benchmark", 16 * 1024 * 1024)
         const createdAt = "2024-01-01T00:00:00.000Z"
         const digits = "WITH digits(value) AS (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)), "
@@ -34,7 +34,7 @@ TestCase {
 
         Database.configureDatabaseForTests(name)
         Database.setTimeZoneValidator(function(timezoneId) {
-            return WorkTodoTime.TimeMath.isValidTimeZone(timezoneId)
+            return WorkbenchTime.TimeMath.isValidTimeZone(timezoneId)
         })
         const taskStart = Date.now()
         const tasks = Database.listTasks({ statuses: ["ready"] })
@@ -43,7 +43,7 @@ TestCase {
         verify(taskElapsed < 5000, "Listing 5,000 tasks took " + taskElapsed + " ms")
 
         const reportStart = Date.now()
-        const report = Reports.monthlyReport(WorkTodoTime.TimeMath, {
+        const report = Reports.monthlyReport(WorkbenchTime.TimeMath, {
             year: 2024,
             month: 1,
             firstDayOfWeek: 1,

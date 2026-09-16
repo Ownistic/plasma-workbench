@@ -104,8 +104,8 @@ Kirigami.AbstractCard {
     Drag.active: dragHandler.active
     Drag.hotSpot.x: width / 2
     Drag.hotSpot.y: height / 2
-    Drag.keys: ["application/x-worktodo-task"]
-    Drag.mimeData: ({ "application/x-worktodo-task": root.task.taskId })
+    Drag.keys: ["application/x-workbench-task"]
+    Drag.mimeData: ({ "application/x-workbench-task": root.task.taskId })
 
     DragHandler {
         id: dragHandler
@@ -129,7 +129,7 @@ Kirigami.AbstractCard {
 
     DropArea {
         anchors.fill: parent
-        keys: ["application/x-worktodo-task"]
+        keys: ["application/x-workbench-task"]
         function placementFor(drag) {
             return drag.y >= height / 2 ? "after" : "before"
         }

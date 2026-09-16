@@ -6,11 +6,17 @@
             }
         ],
         "Category": "Utilities",
-        "Description": "Organize work tasks and track work time.",
+        "Description": "A card-based task manager and work-time tracker for KDE Plasma.",
         "Icon": "view-task",
         "Id": "io.github.ownisticapps.worktodo",
+        "Keywords": [
+            "tasks",
+            "task manager",
+            "time tracking",
+            "productivity"
+        ],
         "License": "GPL-3.0-or-later",
-        "Name": "Work Todo",
+        "Name": "Workbench",
         "Version": "0.1.0"
     },
     "KPackageStructure": "Plasma/Applet",

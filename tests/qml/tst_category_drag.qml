@@ -1,8 +1,8 @@
 import QtQuick
 import QtTest
 
-import "../../package/contents/ui" as WorkTodoUi
-import "../../package/contents/ui/time" as WorkTodoTime
+import "../../package/contents/ui" as WorkbenchUi
+import "../../package/contents/ui/time" as WorkbenchTime
 import "../../package/contents/code/Database.js" as Database
 
 TestCase {
@@ -58,7 +58,7 @@ TestCase {
     Component {
         id: boardComponent
 
-        WorkTodoUi.TodoBoard {
+        WorkbenchUi.TodoBoard {
             width: 560
             height: 900
             plasmoidConfiguration: testConfiguration
@@ -70,9 +70,9 @@ TestCase {
         databaseNumber += 1
         testConfiguration.allowConcurrentTimers = false
         testPlasmoidRoot.activeSessions = []
-        Database.configureDatabaseForTests("worktodo-category-drag-" + Date.now() + "-" + databaseNumber)
+        Database.configureDatabaseForTests("workbench-category-drag-" + Date.now() + "-" + databaseNumber)
         Database.setTimeZoneValidator(function(timezoneId) {
-            return WorkTodoTime.TimeMath.isValidTimeZone(timezoneId)
+            return WorkbenchTime.TimeMath.isValidTimeZone(timezoneId)
         })
         Database.initialize()
 

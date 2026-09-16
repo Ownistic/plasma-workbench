@@ -6,7 +6,7 @@ import org.kde.plasma.components as PlasmaComponents
 
 import "../code/Database.js" as Database
 import "../code/Markdown.js" as Markdown
-import "time" as WorkTodoTime
+import "time" as WorkbenchTime
 
 FocusScope {
     id: root
@@ -111,9 +111,9 @@ FocusScope {
         workSessionEditor.session = session
         workSessionEditor.title = session ? i18n("Edit work session") : i18n("Add work session")
         workSessionEditor.timezoneId = session ? session.timezone_id : root.board.reportTimezone
-        const start = session ? WorkTodoTime.TimeMath.localPartsForUtc(session.started_at_utc, workSessionEditor.timezoneId) : null
+        const start = session ? WorkbenchTime.TimeMath.localPartsForUtc(session.started_at_utc, workSessionEditor.timezoneId) : null
         const end = session && session.ended_at_utc
-            ? WorkTodoTime.TimeMath.localPartsForUtc(session.ended_at_utc, workSessionEditor.timezoneId) : null
+            ? WorkbenchTime.TimeMath.localPartsForUtc(session.ended_at_utc, workSessionEditor.timezoneId) : null
         workSessionDateField.text = start && start.valid ? start.date : ""
         workSessionEndDateField.text = end && end.valid ? end.date : workSessionDateField.text
         workSessionStartField.text = start && start.valid ? localTimeText(start) : ""
@@ -126,7 +126,7 @@ FocusScope {
 
     function openManualSessionForm() {
         longSessionConfirmation.inlineSession = false
-        const now = WorkTodoTime.TimeMath.localPartsForUtc(new Date().toISOString(), root.board.reportTimezone)
+        const now = WorkbenchTime.TimeMath.localPartsForUtc(new Date().toISOString(), root.board.reportTimezone)
         manualSessionStartField.text = now.valid ? now.date + " " + twoDigits(now.hour) + ":" + twoDigits(now.minute) : ""
         manualSessionDurationField.text = "01:00"
         manualSessionStartOffset.model = []
@@ -164,7 +164,7 @@ FocusScope {
         if (!date || !time) {
             return { valid: false, error: i18n("Use a date in YYYY-MM-DD and a time in HH:MM format.") }
         }
-        return WorkTodoTime.TimeMath.possibleUtcInstantsForLocal(
+        return WorkbenchTime.TimeMath.possibleUtcInstantsForLocal(
             Number(date[1]), Number(date[2]), Number(date[3]), Number(time[1]), Number(time[2]),
             time[3] === undefined ? 0 : Number(time[3]),
             time[4] === undefined ? 0 : Number((time[4] + "000").slice(0, 3)),
@@ -174,7 +174,7 @@ FocusScope {
 
     function offsetChoices(candidates) {
         return candidates.utcInstants.map(function(utc) {
-            const parts = WorkTodoTime.TimeMath.localPartsForUtc(utc, workSessionEditor.timezoneId)
+            const parts = WorkbenchTime.TimeMath.localPartsForUtc(utc, workSessionEditor.timezoneId)
             const offset = Number(parts.offsetSeconds)
             const sign = offset < 0 ? "-" : "+"
             const absoluteOffset = Math.abs(offset)
@@ -191,7 +191,7 @@ FocusScope {
         if (!match) {
             return { valid: false, error: i18n("Use a start date and time in YYYY-MM-DD HH:MM format.") }
         }
-        return WorkTodoTime.TimeMath.possibleUtcInstantsForLocal(
+        return WorkbenchTime.TimeMath.possibleUtcInstantsForLocal(
             Number(match[1]), Number(match[2]), Number(match[3]), Number(match[4]), Number(match[5]), 0, 0,
             root.board.reportTimezone
         )
@@ -199,7 +199,7 @@ FocusScope {
 
     function manualOffsetChoices(candidates) {
         return candidates.utcInstants.map(function(utc) {
-            const parts = WorkTodoTime.TimeMath.localPartsForUtc(utc, root.board.reportTimezone)
+            const parts = WorkbenchTime.TimeMath.localPartsForUtc(utc, root.board.reportTimezone)
             const offset = Number(parts.offsetSeconds)
             const sign = offset < 0 ? "-" : "+"
             const absoluteOffset = Math.abs(offset)

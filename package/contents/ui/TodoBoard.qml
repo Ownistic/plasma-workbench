@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
-import "time" as WorkTodoTime
+import "time" as WorkbenchTime
 
 import "../code/Database.js" as Database
 
@@ -43,8 +43,8 @@ Item {
     readonly property bool hasActiveSession: root.plasmoidRoot.hasActiveSession
     readonly property string activeElapsedText: root.plasmoidRoot.activeElapsedText
     readonly property string activeTaskSummary: root.plasmoidRoot.activeTaskSummary
-    readonly property string reportTimezone: WorkTodoTime.TimeMath.isValidTimeZone(root.plasmoidConfiguration.reportTimezone)
-        ? root.plasmoidConfiguration.reportTimezone : WorkTodoTime.TimeMath.systemTimeZoneId()
+    readonly property string reportTimezone: WorkbenchTime.TimeMath.isValidTimeZone(root.plasmoidConfiguration.reportTimezone)
+        ? root.plasmoidConfiguration.reportTimezone : WorkbenchTime.TimeMath.systemTimeZoneId()
     readonly property int firstDayOfWeek: root.plasmoidConfiguration.firstDayOfWeek >= 1
         && root.plasmoidConfiguration.firstDayOfWeek <= 7 ? root.plasmoidConfiguration.firstDayOfWeek : 1
     readonly property bool use24HourTime: root.plasmoidConfiguration.use24HourTime !== false
@@ -80,7 +80,7 @@ Item {
     }
 
     function formatTimestamp(utc) {
-        const formatted = WorkTodoTime.TimeMath.formatUtcForLocal(utc, root.reportTimezone, root.use24HourTime)
+        const formatted = WorkbenchTime.TimeMath.formatUtcForLocal(utc, root.reportTimezone, root.use24HourTime)
         return formatted.valid ? formatted.formatted : utc
     }
 
@@ -433,7 +433,7 @@ Item {
 
     Component.onCompleted: {
         Database.setTimeZoneValidator(function(timezoneId) {
-            return WorkTodoTime.TimeMath.isValidTimeZone(timezoneId)
+            return WorkbenchTime.TimeMath.isValidTimeZone(timezoneId)
         })
         Database.initialize()
         const configuredStatuses = root.plasmoidConfiguration.defaultStatusFilter.split(",")
@@ -456,7 +456,7 @@ Item {
             Kirigami.Heading {
                 Layout.fillWidth: true
                 level: 2
-                text: i18n("Work Todo")
+                text: i18n("Workbench")
             }
 
             PlasmaComponents.Label {
@@ -637,7 +637,7 @@ Item {
                                 y: root.draggedCategoryPlacement === "before" ? 0 : categoryHeader.implicitHeight
                                 visible: categoryHeaderSlot.insertionTarget
                                 z: 3
-                                keys: ["application/x-worktodo-category"]
+                                keys: ["application/x-workbench-category"]
                                 onEntered: function(drag) {
                                     if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
                                         root.previewCategoryMove(drag.source.categoryId, model.id, root.draggedCategoryPlacement, categorySlot)
@@ -659,7 +659,7 @@ Item {
                                 y: -categoryHeaderSlot.y
                                 visible: root.draggedCategoryId.length > 0 && root.draggedCategoryId !== model.id
                                 z: 2
-                                keys: ["application/x-worktodo-category"]
+                                keys: ["application/x-workbench-category"]
                                 onEntered: function(drag) {
                                     if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
                                         root.previewCategoryMove(drag.source.categoryId, model.id,
@@ -778,7 +778,7 @@ Item {
                                     y: root.draggedTaskPlacement === "before" ? 0 : taskCard.implicitHeight
                                     visible: taskSlot.insertionTarget
                                     z: 3
-                                    keys: ["application/x-worktodo-task"]
+                            keys: ["application/x-workbench-task"]
                                     onEntered: function(drag) {
                                         if (drag.source && drag.source.task && drag.source.task.taskId !== model.taskId) {
                                             root.previewTaskMove(drag.source.task.taskId, model.taskId, model.categoryId, root.draggedTaskPlacement, taskSlot)
@@ -875,7 +875,7 @@ Item {
                                 anchors.fill: parent
                                 visible: bottomCategoryPlaceholder.insertionTarget
                                 z: 3
-                                keys: ["application/x-worktodo-category"]
+                    keys: ["application/x-workbench-category"]
                                 onEntered: function(drag) {
                                     if (drag.source && drag.source.categoryId && drag.source.categoryId !== model.id) {
                                         root.previewCategoryMove(drag.source.categoryId, model.id, "after", categorySlot)
@@ -904,7 +904,7 @@ Item {
                         height: hiddenDestination && (root.draggedTaskId.length > 0 || root.draggedCategoryId.length > 0)
                             ? (root.draggedTaskItem ? root.draggedTaskItem.implicitHeight
                                 : (root.draggedCategoryGroupHeight || Kirigami.Units.gridUnit * 2)) : 0
-                        keys: ["application/x-worktodo-task", "application/x-worktodo-category"]
+                        keys: ["application/x-workbench-task", "application/x-workbench-category"]
                         onEntered: function(drag) {
                             if (drag.source && drag.source.task) {
                                 root.previewTaskMove(drag.source.task.taskId, null, model.id, "after", hiddenCategoryDrop)

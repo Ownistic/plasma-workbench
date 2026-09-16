@@ -91,8 +91,8 @@ PlasmaExtras.ListSectionHeader {
     Drag.active: categoryDragHandler.active
     Drag.hotSpot.x: width / 2
     Drag.hotSpot.y: height / 2
-    Drag.keys: ["application/x-worktodo-category"]
-    Drag.mimeData: ({ "application/x-worktodo-category": root.categoryId })
+    Drag.keys: ["application/x-workbench-category"]
+    Drag.mimeData: ({ "application/x-workbench-category": root.categoryId })
 
     DragHandler {
         id: categoryDragHandler
@@ -117,7 +117,7 @@ PlasmaExtras.ListSectionHeader {
 
     DropArea {
         anchors.fill: parent
-        keys: ["application/x-worktodo-task", "application/x-worktodo-category"]
+        keys: ["application/x-workbench-task", "application/x-workbench-category"]
         function placementFor(drag) {
             return drag.y >= height / 2 ? "after" : "before"
         }

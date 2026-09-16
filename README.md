@@ -1,6 +1,8 @@
-# Work Todo
+# Workbench
 
-Work Todo is a KDE Plasma 6 desktop widget for personal task management and local work-time tracking.
+A card-based task manager and work-time tracker for KDE Plasma.
+
+Workbench keeps tasks, status, categories, tracked time, and work reports directly on the Plasma desktop.
 
 ## Build and Test
 
@@ -21,7 +23,7 @@ cmake --build build --target benchmark-repository
 Use Qt 6 tooling explicitly on this system:
 
 ```sh
-/usr/lib/qt6/bin/qmllint -I build/qml package/contents/ui
+/usr/lib/qt6/bin/qmllint -I build/qml package/contents/ui/*.qml
 /usr/lib/qt6/bin/qmltestrunner -import build/qml -input tests/qml
 ```
 
@@ -29,7 +31,7 @@ Build the self-contained plasmoid, then create a release archive and install it 
 
 ```sh
 cmake --build build --target package-plasmoid
-kpackagetool6 --type Plasma/Applet --install build/work-todo-0.1.0.plasmoid
+kpackagetool6 --type Plasma/Applet --install build/plasma-workbench-0.1.0.plasmoid
 ```
 
 The `package-plasmoid` target stages `package/`, uses a fixed `SOURCE_DATE_EPOCH`, and writes a ZIP-compatible `.plasmoid` whose root contains `metadata.json` and `contents/`. The native timezone module is placed in `package/contents/ui/time/` during the build and is included with the archive.
@@ -41,6 +43,14 @@ Use the convenience scripts for a user-scoped install, upgrade, or removal:
 ./scripts/update.sh
 ./scripts/remove.sh
 ```
+
+## Compatibility
+
+The Plasma package and LocalStorage database identifier remains
+`io.github.ownisticapps.worktodo` so upgrades retain existing widgets, settings,
+tasks, tracked time, categories, and reports. This legacy technical identifier is
+not the repository slug; release archives and repository references use
+`plasma-workbench`.
 
 With `kpackagetool6` available at configure time, run the isolated archive-install smoke test after building the release target:
 

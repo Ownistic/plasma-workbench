@@ -40,7 +40,7 @@ References:
 Use this initial structure:
 
 ```text
-work-todo-plasmoid/
+plasma-workbench/
 ├── package/
 │   ├── metadata.json
 │   └── contents/
@@ -70,10 +70,10 @@ Reference: [KDE Plasma widget setup](https://develop.kde.org/docs/plasma/widget/
 
 ## 4. Select identifiers
 
-Choose a unique reverse-domain plugin identifier before the first installed development build. Example:
+Choose a unique reverse-domain plugin identifier before the first installed development build. Workbench retains its existing identifier for upgrade compatibility:
 
 ```text
-io.github.christianespinoza.worktodo
+io.github.ownisticapps.worktodo
 ```
 
 Use the same identifier for:
@@ -83,7 +83,7 @@ Use the same identifier for:
 - The LocalStorage database name or a product-specific derivative.
 - The translation domain when translations are added.
 
-Do not reuse the identifier of an older test widget. A user-installed package can override a system-installed package with the same identifier.
+Do not reuse the identifier of an older test widget. A user-installed package can override a system-installed package with the same identifier. The retained Workbench identifier is a legacy technical identifier, not the repository slug; use `plasma-workbench` for repository and release-archive names.
 
 ## 5. Run without installation
 
@@ -129,7 +129,7 @@ Remove the installed package:
 kpackagetool6 --type=Plasma/Applet --remove io.github.ownisticapps.worktodo
 ```
 
-After installation, open Plasma’s **Add Widgets** interface and add **Work Todo** to the desktop.
+After installation, open Plasma’s **Add Widgets** interface and add **Workbench** to the desktop.
 
 ## 7. Debug the widget
 
@@ -223,7 +223,7 @@ Create a ZIP-compatible archive whose root contains `metadata.json` and `content
 cmake --build build --target package-plasmoid
 ```
 
-The archive is written to `build/work-todo-0.1.0.plasmoid`. CMake creates it with a fixed `SOURCE_DATE_EPOCH`, so equivalent package contents produce a reproducible archive. When `kpackagetool6` was found during configuration, verify archive installation in an isolated package root:
+The archive is written to `build/plasma-workbench-0.1.0.plasmoid`. CMake creates it with a fixed `SOURCE_DATE_EPOCH`, so equivalent package contents produce a reproducible archive. When `kpackagetool6` was found during configuration, verify archive installation in an isolated package root:
 
 ```bash
 ctest --test-dir build -R plasmoid-archive-install --output-on-failure
@@ -250,7 +250,7 @@ The C++ module should provide:
 - Report result models.
 - Explicit backup and export operations.
 
-Store native application data under a predictable product directory. `QStandardPaths::GenericDataLocation` maps to `~/.local/share` on Linux, so a product-specific child such as `~/.local/share/worktodo/` is appropriate when data must be shared with a companion application.
+Store native application data under a predictable product directory. `QStandardPaths::GenericDataLocation` maps to `~/.local/share` on Linux, so a product-specific child such as `~/.local/share/workbench/` is appropriate when data must be shared with a companion application.
 
 References:
 

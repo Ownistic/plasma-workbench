@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import "../../package/contents/ui/time" as WorkTodoTime
+import "../../package/contents/ui/time" as WorkbenchTime
 
 import "../../package/contents/code/Database.js" as Database
 import "../../package/contents/code/Reports.js" as Reports
@@ -12,9 +12,9 @@ TestCase {
 
     function init() {
         databaseNumber += 1
-        Database.configureDatabaseForTests("worktodo-test-" + Date.now() + "-" + databaseNumber)
+        Database.configureDatabaseForTests("workbench-test-" + Date.now() + "-" + databaseNumber)
         Database.setTimeZoneValidator(function(timezoneId) {
-            return WorkTodoTime.TimeMath.isValidTimeZone(timezoneId)
+            return WorkbenchTime.TimeMath.isValidTimeZone(timezoneId)
         })
         Database.initialize()
     }
@@ -329,7 +329,7 @@ TestCase {
             timezoneId: "Europe/Berlin"
         })
 
-        const report = Reports.weeklyReport(WorkTodoTime.TimeMath, {
+        const report = Reports.weeklyReport(WorkbenchTime.TimeMath, {
             year: 2024,
             month: 1,
             day: 2,
@@ -549,14 +549,14 @@ TestCase {
     }
 
     function test_emptyReportsSeedAllCalendarBuckets() {
-        const weekly = Reports.weeklyReport(WorkTodoTime.TimeMath, {
+        const weekly = Reports.weeklyReport(WorkbenchTime.TimeMath, {
             year: 2024,
             month: 3,
             day: 13,
             firstDayOfWeek: 1,
             timezoneId: "America/New_York"
         })
-        const monthly = Reports.monthlyReport(WorkTodoTime.TimeMath, {
+        const monthly = Reports.monthlyReport(WorkbenchTime.TimeMath, {
             year: 2024,
             month: 2,
             firstDayOfWeek: 1,

@@ -5,7 +5,7 @@ import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.extras as PlasmaExtras
 import org.kde.quickcharts as Charts
-import "time" as WorkTodoTime
+import "time" as WorkbenchTime
 
 import "../code/Reports.js" as Reports
 
@@ -38,7 +38,7 @@ Controls.Dialog {
     }
 
     function loadCurrentDate() {
-        const localDate = WorkTodoTime.TimeMath.localDateForUtc(new Date().toISOString(), root.board.reportTimezone)
+        const localDate = WorkbenchTime.TimeMath.localDateForUtc(new Date().toISOString(), root.board.reportTimezone)
         const pieces = localDate.split("-")
         root.year = Number(pieces[0])
         root.month = Number(pieces[1])
@@ -47,14 +47,14 @@ Controls.Dialog {
 
     function refresh() {
         if (root.monthly) {
-            root.report = Reports.monthlyReport(WorkTodoTime.TimeMath, {
+            root.report = Reports.monthlyReport(WorkbenchTime.TimeMath, {
                 year: root.year,
                 month: root.month,
                 firstDayOfWeek: root.board.firstDayOfWeek,
                 timezoneId: root.board.reportTimezone
             })
         } else {
-            root.report = Reports.weeklyReport(WorkTodoTime.TimeMath, {
+            root.report = Reports.weeklyReport(WorkbenchTime.TimeMath, {
                 year: root.year,
                 month: root.month,
                 day: root.day,

@@ -114,7 +114,7 @@ function apply(tx, appliedAtUtc) {
         currentVersion = version
     }
     if (currentVersion > CURRENT_VERSION) {
-        throw new Error("The database was created by a newer version of Work Todo.")
+        throw new Error("The database was created by a newer version of Workbench.")
     }
 
     for (let index = 0; index < migrations.length; index += 1) {

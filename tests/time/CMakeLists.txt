@@ -4,7 +4,7 @@ add_executable(tst_timemath
 
 target_link_libraries(tst_timemath
     PRIVATE
-        worktodo_time
+        workbench_time
         Qt6::Core
         Qt6::Test
 )

@@ -1,6 +1,6 @@
-# KDE Plasma 6 API reference for Work Todo Plasmoid
+# KDE Plasma 6 API reference for Workbench
 
-This document summarizes the KDE APIs required by Work Todo Plasmoid. It is an implementation reference, not a replacement for the linked upstream documentation.
+This document summarizes the KDE APIs required by Workbench. It is an implementation reference, not a replacement for the linked upstream documentation.
 
 ## 1. Plasma widget package
 
@@ -19,9 +19,9 @@ Minimum `metadata.json` structure:
     "Category": "Utilities",
     "Description": "Organize work tasks and track work time.",
     "Icon": "view-task",
-    "Id": "com.example.worktodo",
+    "Id": "com.example.workbench",
     "License": "GPL-3.0-or-later",
-    "Name": "Work Todo",
+    "Name": "Workbench",
     "Version": "0.1.0"
   },
   "KPackageStructure": "Plasma/Applet",
@@ -29,7 +29,7 @@ Minimum `metadata.json` structure:
 }
 ```
 
-Replace `com.example.worktodo` before implementation. The directory installed under the Plasma applet location must match `KPlugin.Id`.
+Replace `com.example.workbench` before implementation. The directory installed under the Plasma applet location must match `KPlugin.Id`.
 
 Plasma 6 requirements:
 

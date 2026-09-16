@@ -1,2 +1,2 @@
-module io.github.ownisticapps.worktodo.time
-plugin worktodo_timeplugin
+module io.github.ownisticapps.workbench.time
+plugin workbench_timeplugin

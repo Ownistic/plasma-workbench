@@ -5,7 +5,7 @@ import org.kde.plasma.plasmoid
 PlasmoidItem {
     id: root
 
-    toolTipMainText: i18n("Work Todo")
+    toolTipMainText: i18n("Workbench")
     toolTipSubText: activeTaskSummary
     implicitWidth: Kirigami.Units.gridUnit * 28
     implicitHeight: Kirigami.Units.gridUnit * 38

@@ -44,7 +44,7 @@ add_test(
 
 add_custom_target(benchmark-repository
     COMMAND ${QMLTESTRUNNER} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark
-    DEPENDS worktodo_timeplugin
+    DEPENDS workbench_timeplugin
     COMMENT "Benchmarking 5,000 tasks and 100,000 work sessions"
     VERBATIM
 )

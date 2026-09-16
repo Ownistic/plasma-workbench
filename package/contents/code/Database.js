@@ -3,6 +3,7 @@
 .import QtQuick.LocalStorage as Sql
 .import "Migrations.js" as Migrations
 
+// Keep this established LocalStorage name so rebranding does not orphan user data.
 const DATABASE_ID = "io.github.ownisticapps.worktodo"
 const POSITION_GAP = 1024
 const POSITION_OFFSET = 1000000000
@@ -93,7 +94,7 @@ function open() {
         database = Sql.LocalStorage.openDatabaseSync(
             databaseName,
             "1.0",
-            "Work Todo data",
+            "Workbench data",
             5 * 1024 * 1024
         )
     }

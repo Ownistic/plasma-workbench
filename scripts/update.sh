@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Retain this package ID so upgrades preserve existing Plasma configuration.
 readonly PLASMOID_ID="io.github.ownisticapps.worktodo"
 readonly PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly BUILD_DIR="${BUILD_DIR:-${PROJECT_ROOT}/build}"
-readonly ARCHIVE="${BUILD_DIR}/work-todo-0.1.0.plasmoid"
+readonly ARCHIVE="${BUILD_DIR}/plasma-workbench-0.1.0.plasmoid"
 
 command -v cmake >/dev/null || { echo "cmake is required." >&2; exit 1; }
 command -v kpackagetool6 >/dev/null || { echo "kpackagetool6 is required." >&2; exit 1; }

@@ -8,7 +8,7 @@ TestCase {
     name: "Migrations"
 
     function test_versionOneMigratesToCurrentSchema() {
-        const database = Sql.LocalStorage.openDatabaseSync("worktodo-migration-" + Date.now(), "1.0", "migration test", 1024 * 1024)
+        const database = Sql.LocalStorage.openDatabaseSync("workbench-migration-" + Date.now(), "1.0", "migration test", 1024 * 1024)
         database.transaction(function(tx) {
             tx.executeSql("CREATE TABLE categories (id TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL, position INTEGER NOT NULL, collapsed INTEGER NOT NULL DEFAULT 0, created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL)")
             tx.executeSql("CREATE TABLE tasks (id TEXT PRIMARY KEY, category_id TEXT NOT NULL, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, position INTEGER NOT NULL, archived_at_utc TEXT, completed_at_utc TEXT, created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL)")

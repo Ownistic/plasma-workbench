@@ -1,6 +1,6 @@
-# Qt 6 and QML API reference for Work Todo Plasmoid
+# Qt 6 and QML API reference for Workbench
 
-This document maps Work Todo Plasmoid behavior to public Qt 6 and QML APIs.
+This document maps Workbench behavior to public Qt 6 and QML APIs.
 
 ## 1. Versionless imports
 
@@ -99,7 +99,7 @@ Qt Quick supplies three relevant mechanisms:
 - The attached `Drag` object generates drag events.
 - `DropArea` receives the drag when the pointer crosses another card or category target.
 
-The Qt dynamic ordering tutorial uses `DelegateModel.items.move()` to change visible order. Work Todo Plasmoid must persist the operation through the repository instead.
+The Qt dynamic ordering tutorial uses `DelegateModel.items.move()` to change visible order. Workbench must persist the operation through the repository instead.
 
 Recommended command contract:
 
@@ -144,9 +144,9 @@ Open the database with a product-specific identifier:
 
 ```javascript
 const db = Sql.LocalStorage.openDatabaseSync(
-    "com.example.worktodo",
+    "com.example.workbench",
     "1.0",
-    "Work Todo data",
+    "Workbench data",
     5 * 1024 * 1024
 )
 ```

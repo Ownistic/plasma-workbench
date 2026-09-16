@@ -1,4 +1,4 @@
-# Product requirements document: Work Todo Plasmoid
+# Product requirements document: Workbench
 
 **Status:** Draft 1  
 **Target platform:** KDE Plasma 6 on CachyOS and compatible Linux distributions  
@@ -8,7 +8,7 @@
 
 ## 1. Product summary
 
-Work Todo Plasmoid is a local-first task and work-time tracker displayed directly on the KDE Plasma desktop. The widget combines a card-based task list, status history, category organization, drag-and-drop ordering, task details, and weekly or monthly work reports.
+Workbench is a local-first task and work-time tracker displayed directly on the KDE Plasma desktop. The widget combines a card-based task list, status history, category organization, drag-and-drop ordering, task details, and weekly or monthly work reports.
 
 The widget must make the current work queue visible without requiring a browser or a separate task-management service. The widget must operate without a network connection and must keep all task data on the local device.
 
@@ -246,7 +246,7 @@ The database must use stable text identifiers. The interface must not use a list
 
 The database must store timestamps in UTC. Each work session must also store the timezone used when the session was created or corrected.
 
-Detailed schema and calculation rules are defined in [PERSISTENCE_AND_REPORTING.md](docs/PERSISTENCE_AND_REPORTING.md).
+Detailed schema and calculation rules are defined in [PERSISTENCE_AND_REPORTING.md](PERSISTENCE_AND_REPORTING.md).
 
 ## 10. Quality requirements
 
