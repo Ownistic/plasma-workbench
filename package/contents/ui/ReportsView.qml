@@ -13,6 +13,8 @@ import "../code/Reports.js" as Reports
 FocusScope {
     id: root
     objectName: "reports-view"
+    Accessible.role: Accessible.Pane
+    Accessible.name: i18n("Reports")
 
     required property var board
     property int year: 0
@@ -226,10 +228,22 @@ FocusScope {
                     root.refresh()
                 }
             }
-            PlasmaComponents.TabButton { text: i18n("Day") }
-            PlasmaComponents.TabButton { text: i18n("Week") }
-            PlasmaComponents.TabButton { text: i18n("Month") }
-            PlasmaComponents.TabButton { text: i18n("Year") }
+            PlasmaComponents.TabButton {
+                objectName: "reports-day-tab"
+                text: i18n("Day")
+            }
+            PlasmaComponents.TabButton {
+                objectName: "reports-week-tab"
+                text: i18n("Week")
+            }
+            PlasmaComponents.TabButton {
+                objectName: "reports-month-tab"
+                text: i18n("Month")
+            }
+            PlasmaComponents.TabButton {
+                objectName: "reports-year-tab"
+                text: i18n("Year")
+            }
         }
 
         Kirigami.Heading {

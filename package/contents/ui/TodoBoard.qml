@@ -1353,6 +1353,7 @@ Item {
 
     Controls.Dialog {
         id: createTaskDialog
+        objectName: "create-task-dialog"
         parent: root
         modal: true
         title: i18n("Create task")
@@ -1360,6 +1361,8 @@ Item {
         width: Math.min(root.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 24)
 
         onOpened: {
+            const saveButton = standardButton(Controls.Dialog.Save)
+            if (saveButton) saveButton.objectName = "create-task-save"
             taskTitle.text = ""
             taskDescription.text = ""
             taskStatus.currentIndex = 0
@@ -1384,8 +1387,10 @@ Item {
 
             PlasmaComponents.TextField {
                 id: taskTitle
+                objectName: "create-task-title"
                 Layout.fillWidth: true
                 placeholderText: i18n("Task title")
+                Accessible.name: i18n("Task title")
             }
 
             PlasmaComponents.ComboBox {
@@ -1413,11 +1418,14 @@ Item {
 
     Controls.Dialog {
         id: createCategoryDialog
+        objectName: "create-category-dialog"
         parent: root
         modal: true
         title: i18n("Create category")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
         onOpened: {
+            const saveButton = standardButton(Controls.Dialog.Save)
+            if (saveButton) saveButton.objectName = "create-category-save"
             categoryName.text = ""
             categoryName.forceActiveFocus()
         }
@@ -1428,8 +1436,10 @@ Item {
 
         contentItem: PlasmaComponents.TextField {
             id: categoryName
+            objectName: "create-category-name"
             implicitWidth: Kirigami.Units.gridUnit * 20
             placeholderText: i18n("Category name")
+            Accessible.name: i18n("Category name")
         }
     }
 

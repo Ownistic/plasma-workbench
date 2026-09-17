@@ -209,6 +209,19 @@ Test:
 - Panel compact representation.
 - Plasma restart with an active session.
 
+Use Qt Quick Test for component-level interaction and KDE's Appium
+`selenium-webdriver-at-spi` driver for black-box workflows. Set up the isolated
+driver and run the E2E target with:
+
+```bash
+./scripts/setup-e2e.sh
+cmake --build build --target e2e
+```
+
+Appium tests must use stable accessibility names or object names, create their
+own state through the interface, and run in the driver's clean XDG and D-Bus
+environment. See [`tests/e2e/README.md`](tests/e2e/README.md).
+
 ### 8.4 Static checks
 
 Run Qt’s QML linter against every QML source. Use the executable path supplied by the installed Qt package if `qmllint` is not directly available on `PATH`.

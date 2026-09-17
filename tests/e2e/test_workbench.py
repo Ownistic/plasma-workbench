@@ -1,0 +1,184 @@
+# SPDX-FileCopyrightText: 2026 OwnisticApps
+# SPDX-License-Identifier: LGPL-3.0-or-later
+# pyright: reportMissingImports=false
+
+"""Black-box Appium coverage for the Workbench plasmoid."""
+
+from __future__ import annotations
+
+import os
+import shlex
+import unittest
+from pathlib import Path
+
+from appium import webdriver
+from appium.options.common.base import AppiumOptions
+from appium.webdriver.common.appiumby import AppiumBy
+from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.support import expected_conditions as conditions
+from selenium.webdriver.support.ui import WebDriverWait
+
+APPIUM_SERVER_URL = "http://127.0.0.1:4723"
+CATEGORY_NAME = "Appium category"
+MAX_RSS_KIB = 768 * 1024
+MAX_RSS_GROWTH_KIB = 96 * 1024
+NAVIGATION_ITERATIONS = 10
+
+
+def plasmawindowed_rss_kib(package_dir: Path) -> int:
+    """Return RSS for the plasmawindowed instance hosting this source package."""
+    package_bytes = os.fsencode(str(package_dir))
+    matches: list[int] = []
+    for process_dir in Path("/proc").glob("[0-9]*"):
+        try:
+            command_line = (process_dir / "cmdline").read_bytes()
+            if b"plasmawindowed" not in command_line or package_bytes not in command_line:
+                continue
+            for line in (process_dir / "status").read_text(encoding="utf-8").splitlines():
+                if line.startswith("VmRSS:"):
+                    matches.append(int(line.split()[1]))
+                    break
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+    if len(matches) != 1:
+        raise AssertionError(f"Expected one Workbench plasmawindowed process, found {len(matches)}")
+    return matches[0]
+
+
+class WorkbenchEndToEndTest(unittest.TestCase):
+    """Exercise Workbench through the same accessibility API used by Plasma."""
+
+    driver: webdriver.Remote
+    wait: WebDriverWait
+    package_dir: Path
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        package_value = os.environ.get("WORKBENCH_PACKAGE_DIR")
+        if not package_value:
+            raise RuntimeError("WORKBENCH_PACKAGE_DIR must point at the built plasmoid package")
+        cls.package_dir = Path(package_value).resolve()
+        if not (cls.package_dir / "metadata.json").is_file():
+            raise RuntimeError(f"Invalid plasmoid package directory: {cls.package_dir}")
+
+        options = AppiumOptions()
+        command = "plasmawindowed -p org.kde.plasma.nano " + shlex.quote(str(cls.package_dir))
+        options.set_capability("app", command)
+        options.set_capability("timeouts", {"implicit": 10000})
+        options.set_capability(
+            "environ",
+            {
+                "LC_ALL": "en_US.UTF-8",
+                "QT_LINUX_ACCESSIBILITY_ALWAYS_ON": "1",
+                "QT_LOGGING_RULES": "qt.accessibility.atspi.warning=false",
+            },
+        )
+        cls.driver = webdriver.Remote(command_executor=APPIUM_SERVER_URL, options=options)
+        cls.wait = WebDriverWait(cls.driver, 20)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if hasattr(cls, "driver"):
+            cls.driver.quit()
+
+    def tearDown(self) -> None:
+        outcome = getattr(self, "_outcome", None)
+        result = getattr(outcome, "result", None)
+        if result is not None and result.wasSuccessful():
+            return
+        artifact_dir = Path(os.environ.get("APPIUM_ARTIFACT_OUTPUT_PATH", "."))
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        test_name = self.id().rsplit(".", maxsplit=1)[-1]
+        try:
+            self.driver.get_screenshot_as_file(
+                str(artifact_dir / f"workbench-e2e-{test_name}-failure.png")
+            )
+        except WebDriverException as error:
+            print(f"Could not capture failure screenshot: {error}")
+
+    def element(self, name: str) -> WebElement:
+        return self.wait.until(
+            conditions.presence_of_element_located((AppiumBy.NAME, name))
+        )
+
+    def create_category(self) -> None:
+        self.element("Create category").click()
+        name_field = self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.ACCESSIBILITY_ID, "create-category-name")
+            )
+        )
+        name_field.send_keys(CATEGORY_NAME)
+        self.wait.until(
+            conditions.element_to_be_clickable(
+                (AppiumBy.ACCESSIBILITY_ID, "create-category-save")
+            )
+        ).click()
+
+    def create_task(self) -> None:
+        self.element("Create task").click()
+        title_field = self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.ACCESSIBILITY_ID, "create-task-title")
+            )
+        )
+        title_field.send_keys("Appium task")
+        self.wait.until(
+            conditions.element_to_be_clickable(
+                (AppiumBy.ACCESSIBILITY_ID, "create-task-save")
+            )
+        ).click()
+        self.element(f"Category: {CATEGORY_NAME}")
+
+    def open_daily_report(self) -> WebElement:
+        self.element(f"Open daily timeline for {CATEGORY_NAME}").click()
+        reports_page = self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.ACCESSIBILITY_ID, "reports-page")
+            )
+        )
+        reports_page.find_element(AppiumBy.NAME, "Back to tasks")
+        return reports_page
+
+    def close_report(self, reports_page: WebElement) -> None:
+        reports_page.find_element(AppiumBy.NAME, "Back to tasks").click()
+        self.element(f"Open daily timeline for {CATEGORY_NAME}")
+
+    def test_report_navigation_remains_bounded(self) -> None:
+        self.create_category()
+        self.create_task()
+        rss_samples: list[int] = []
+
+        reports_page = self.open_daily_report()
+        reports_page.find_element(
+            AppiumBy.ACCESSIBILITY_ID, "reports-year-tab"
+        ).send_keys(Keys.SPACE)
+        self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.XPATH, "//*[contains(@name, 'Daily tracked-time heatmap for')]")
+            )
+        )
+        reports_page.find_element(
+            AppiumBy.ACCESSIBILITY_ID, "reports-day-tab"
+        ).send_keys(Keys.SPACE)
+        self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.XPATH, "//*[contains(@name, '15-minute work-session timeline for')]")
+            )
+        )
+        self.close_report(reports_page)
+        baseline_rss = plasmawindowed_rss_kib(self.package_dir)
+
+        for _ in range(NAVIGATION_ITERATIONS):
+            reports_page = self.open_daily_report()
+            self.close_report(reports_page)
+            rss_samples.append(plasmawindowed_rss_kib(self.package_dir))
+
+        self.assertLess(max(rss_samples), MAX_RSS_KIB)
+        self.assertLess(max(rss_samples) - baseline_rss, MAX_RSS_GROWTH_KIB)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -28,6 +28,7 @@ Item {
     implicitHeight: laneHeight + Kirigami.Units.gridUnit * 2
     implicitWidth: Math.max(Kirigami.Units.gridUnit * 24, slotCount * slotWidth)
     Accessible.name: i18n("15-minute work-session timeline for %1", localDate)
+    Accessible.role: Accessible.Graphic
 
     signal sessionCreateRequested(string startUtc, string endUtc)
     signal sessionEditRequested(var segment, string startUtc, string endUtc)

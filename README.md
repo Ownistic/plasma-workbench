@@ -27,6 +27,17 @@ Use Qt 6 tooling explicitly on this system:
 /usr/lib/qt6/bin/qmltestrunner -import build/qml -input tests/qml
 ```
 
+Run black-box plasmoid tests with KDE's Appium AT-SPI driver:
+
+```sh
+./scripts/setup-e2e.sh
+cmake --build build --target e2e
+```
+
+The E2E environment uses an isolated XDG home, D-Bus session, and nested KWin
+compositor. See [`tests/e2e/README.md`](tests/e2e/README.md) for dependencies,
+artifacts, and test-authoring conventions.
+
 Build the self-contained plasmoid, then create a release archive and install it with `kpackagetool6`:
 
 ```sh

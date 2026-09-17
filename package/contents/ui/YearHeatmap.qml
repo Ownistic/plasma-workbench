@@ -16,6 +16,7 @@ Item {
     implicitWidth: 54 * (cellSize + Kirigami.Units.smallSpacing)
     implicitHeight: 7 * (cellSize + Kirigami.Units.smallSpacing)
     Accessible.name: i18n("Daily tracked-time heatmap for %1", year)
+    Accessible.role: Accessible.Graphic
 
     signal daySelected(string date)
 

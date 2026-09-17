@@ -76,6 +76,7 @@ include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests/time)
     add_subdirectory(tests/qml)
+    add_subdirectory(tests/e2e)
 
     add_test(
         NAME plasmoid-cmake-install

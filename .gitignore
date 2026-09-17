@@ -2,3 +2,5 @@
 *.plasmoid
 /package/contents/ui/time/
 /.cortexkit/
+__pycache__/
+*.py[cod]
