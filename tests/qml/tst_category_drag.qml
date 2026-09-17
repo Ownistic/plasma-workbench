@@ -247,4 +247,222 @@ TestCase {
         board.closeReports()
         tryCompare(yearLoader, "item", null, 5000)
     }
+
+    function test_dailyReportExposesDiscoverableEditorControls() {
+        const category = Database.listCategories()[0]
+        board.openDailyTimeline(category.id)
+
+        const reportsPage = findChild(board, "reports-page")
+        const timeline = findChild(reportsPage, "daily-report-timeline")
+        const taskLabel = findChild(reportsPage, "daily-task-label")
+        const addButton = findChild(reportsPage, "report-add-session")
+        const drawButton = findChild(reportsPage, "report-draw-session")
+        const editor = findChild(reportsPage, "daily-session-editor")
+        const taskPicker = findChild(reportsPage, "daily-task-picker")
+        const scrollbar = findChild(reportsPage, "daily-timeline-scrollbar")
+        verify(reportsPage !== null)
+        verify(timeline !== null)
+        verify(taskLabel !== null)
+        verify(taskLabel.text.length > 0)
+        verify(addButton !== null)
+        verify(drawButton !== null)
+        verify(editor !== null)
+        verify(taskPicker !== null)
+        verify(scrollbar !== null)
+        compare(timeline.creationEnabled, false)
+        compare(reportsPage.draftOpen, false)
+
+        addButton.click()
+        tryCompare(reportsPage, "draftOpen", true, 1000)
+        compare(taskPicker.enabled, false)
+        compare(addButton.enabled, false)
+        compare(drawButton.enabled, false)
+        compare(timeline.editable, false)
+        verify(findChild(editor, "daily-session-start") !== null)
+        verify(findChild(editor, "daily-session-end") !== null)
+        verify(findChild(editor, "daily-session-save") !== null)
+        const originalStart = editor.originalStartUtc
+        reportsPage.beginDraft("2026-09-17T12:00:00.000Z", "2026-09-17T12:15:00.000Z", null, addButton)
+        compare(editor.originalStartUtc, originalStart)
+        verify(editor.errorText.indexOf("Save or cancel") >= 0)
+
+        board.closeReports()
+    }
+
+    function test_dailyReportAddsAndSelectsExactSession() {
+        const category = Database.listCategories()[0]
+        board.openDailyTimeline(category.id)
+
+        const reportsPage = findChild(board, "reports-page")
+        const timeline = findChild(reportsPage, "daily-report-timeline")
+        const editor = findChild(reportsPage, "daily-session-editor")
+        const originalTaskId = reportsPage.selectedTaskId
+        const otherTaskId = Database.listTasks({ showArchived: false }).filter(function(task) {
+            return task.taskId !== originalTaskId
+        })[0].taskId
+        findChild(reportsPage, "report-add-session").click()
+        tryCompare(reportsPage, "draftOpen", true, 1000)
+        compare(reportsPage.draftTaskId, originalTaskId)
+
+        findChild(editor, "daily-session-start").text = "09:00:00"
+        findChild(editor, "daily-session-end").text = "09:15:00"
+        reportsPage.selectedTaskId = otherTaskId
+        findChild(editor, "daily-session-save").click()
+
+        tryCompare(reportsPage, "draftOpen", false, 1000)
+        tryCompare(reportsPage.report, "totalSeconds", 15 * 60, 1000)
+        compare(timeline.segments.length, 1)
+        compare(Database.listWorkSessions(originalTaskId).length, 1)
+        compare(Database.listWorkSessions(otherTaskId).length, 0)
+
+        timeline.sessionSelected(timeline.segments[0], null)
+        tryCompare(reportsPage, "draftOpen", true, 1000)
+        compare(editor.editing, true)
+        findChild(editor, "daily-session-end").text = "09:30:00"
+        findChild(editor, "daily-session-save").click()
+        tryCompare(reportsPage, "draftOpen", false, 1000)
+        tryCompare(reportsPage.report, "totalSeconds", 30 * 60, 1000)
+        board.closeReports()
+    }
+
+    function test_dailyReportConfirmsUnusuallyLongSession() {
+        const category = Database.listCategories()[0]
+        board.openDailyTimeline(category.id)
+        const reportsPage = findChild(board, "reports-page")
+        const editor = findChild(reportsPage, "daily-session-editor")
+        const taskId = reportsPage.selectedTaskId
+        findChild(reportsPage, "report-add-session").click()
+        tryCompare(reportsPage, "draftOpen", true, 1000)
+
+        findChild(editor, "daily-session-start").text = "00:00:00"
+        findChild(editor, "daily-session-end").text = "17:00:00"
+        findChild(editor, "daily-session-save").click()
+        compare(reportsPage.draftOpen, true)
+        compare(reportsPage.longSessionConfirmed, true)
+        compare(Database.listWorkSessions(taskId).length, 0)
+
+        findChild(editor, "daily-session-save").click()
+        tryCompare(reportsPage, "draftOpen", false, 1000)
+        compare(Database.listWorkSessions(taskId).length, 1)
+        board.closeReports()
+    }
+
+    function test_dailyReportDoesNotEditActiveSession() {
+        const category = Database.listCategories()[0]
+        const taskId = Database.listTasks({ showArchived: false }).filter(function(task) {
+            return task.categoryId === category.id
+        })[0].taskId
+        Database.startTimer(taskId, "Etc/UTC", new Date(Date.now() - 5 * 60 * 1000).toISOString())
+        board.reload()
+        board.openDailyTimeline(category.id)
+        const reportsPage = findChild(board, "reports-page")
+        const timeline = findChild(reportsPage, "daily-report-timeline")
+        const activeSegment = timeline.segments.filter(function(segment) { return segment.active })[0]
+        verify(activeSegment !== undefined)
+
+        timeline.sessionSelected(activeSegment, null)
+        compare(reportsPage.draftOpen, false)
+        const activeSession = Database.listWorkSessions(taskId).filter(function(session) {
+            return session.id === activeSegment.sessionId
+        })[0]
+        compare(activeSession.ended_at_utc, null)
+        Database.stopTimer(taskId, new Date().toISOString())
+        board.closeReports()
+    }
+
+    function test_dailyEditorPreservesOverlappingDraft() {
+        const category = Database.listCategories()[0]
+        board.openDailyTimeline(category.id)
+        const reportsPage = findChild(board, "reports-page")
+        const editor = findChild(reportsPage, "daily-session-editor")
+        const timeline = findChild(reportsPage, "daily-report-timeline")
+        const taskId = reportsPage.selectedTaskId
+        const base = Date.parse(reportsPage.report.startUtc) + 9 * 60 * 60 * 1000
+        const first = Database.createWorkSession({ taskId: taskId,
+            startedAtUtc: new Date(base).toISOString(), endedAtUtc: new Date(base + 60 * 60 * 1000).toISOString(),
+            timezoneId: board.reportTimezone })
+        const second = Database.createWorkSession({ taskId: taskId,
+            startedAtUtc: new Date(base + 60 * 60 * 1000).toISOString(),
+            endedAtUtc: new Date(base + 2 * 60 * 60 * 1000).toISOString(), timezoneId: board.reportTimezone })
+        reportsPage.refresh()
+        const originalTotal = reportsPage.report.totalSeconds
+
+        reportsPage.beginDraft(new Date(base + 30 * 60 * 1000).toISOString(),
+            new Date(base + 45 * 60 * 1000).toISOString(), null, null)
+        editor.submit()
+        compare(reportsPage.draftOpen, true)
+        verify(editor.errorText.length > 0)
+        compare(Database.listWorkSessions(taskId).length, 2)
+        compare(reportsPage.report.totalSeconds, originalTotal)
+        reportsPage.cancelDraft(false)
+
+        const secondSegment = timeline.segments.filter(function(segment) {
+            return segment.sessionId === second.id
+        })[0]
+        reportsPage.beginDraft(new Date(base + 30 * 60 * 1000).toISOString(),
+            new Date(base + 90 * 60 * 1000).toISOString(), secondSegment, null)
+        editor.submit()
+        compare(reportsPage.draftOpen, true)
+        verify(editor.errorText.length > 0)
+        const unchanged = Database.listWorkSessions(taskId).filter(function(session) {
+            return session.id === second.id
+        })[0]
+        compare(unchanged.started_at_utc, new Date(base + 60 * 60 * 1000).toISOString())
+        compare(unchanged.ended_at_utc, new Date(base + 2 * 60 * 60 * 1000).toISOString())
+        compare(reportsPage.report.totalSeconds, originalTotal)
+        verify(first.id !== undefined)
+        reportsPage.cancelDraft(false)
+        board.closeReports()
+    }
+
+    function test_dailyEditorRequiresExplicitDstOffset() {
+        const category = Database.listCategories()[0]
+        board.openDailyTimeline(category.id)
+        const reportsPage = findChild(board, "reports-page")
+        const editor = findChild(reportsPage, "daily-session-editor")
+        const originalTimezone = editor.timezoneId
+        editor.timezoneId = "America/New_York"
+        verify(editor.load("2026-11-01T07:00:00.000Z", "2026-11-01T08:00:00.000Z", false, "DST task"))
+        findChild(editor, "daily-session-start-date").text = "2026-11-01"
+        findChild(editor, "daily-session-start").text = "01:30:00"
+        editor.refreshOffsetChoices()
+        compare(editor.startOffsetChoices.length, 2)
+        const selector = findChild(editor, "daily-session-start-offset")
+        compare(selector.currentIndex, -1)
+
+        editor.submit()
+        verify(editor.errorText.indexOf("UTC offset") >= 0)
+        selector.currentIndex = 0
+        reportsPage.longSessionConfirmed = true
+        selector.activated(0)
+        compare(reportsPage.longSessionConfirmed, false)
+        const selectedUtc = editor.resolvedUtc(editor.candidates("2026-11-01", "01:30:00"), selector, "start")
+        compare(selectedUtc, selector.currentValue)
+        const missing = editor.candidates("2026-03-08", "02:30:00")
+        verify(!missing.valid || missing.utcInstants.length === 0)
+
+        editor.timezoneId = originalTimezone
+        reportsPage.cancelDraft()
+        board.closeReports()
+    }
+
+    function test_reportTabsPreserveDailyCategoryScope() {
+        const category = Database.listCategories()[0]
+        board.openDailyTimeline(category.id)
+
+        const reportsPage = findChild(board, "reports-page")
+        const tabs = findChild(reportsPage, "report-period-tabs")
+        tabs.currentIndex = 3
+        tryCompare(reportsPage, "period", "year", 1000)
+        compare(reportsPage.categoryId, category.id)
+
+        tabs.currentIndex = 0
+        tryCompare(reportsPage, "period", "day", 1000)
+        compare(reportsPage.categoryId, category.id)
+        verify(reportsPage.availableTasks.length > 0)
+        const timeline = findChild(reportsPage, "daily-report-timeline")
+        verify(timeline !== null)
+        compare(timeline.validRange, true)
+        board.closeReports()
+    }
 }

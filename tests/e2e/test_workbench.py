@@ -53,6 +53,7 @@ class WorkbenchEndToEndTest(unittest.TestCase):
     driver: webdriver.Remote
     wait: WebDriverWait
     package_dir: Path
+    variant: str
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -60,6 +61,7 @@ class WorkbenchEndToEndTest(unittest.TestCase):
         if not package_value:
             raise RuntimeError("WORKBENCH_PACKAGE_DIR must point at the built plasmoid package")
         cls.package_dir = Path(package_value).resolve()
+        cls.variant = os.environ.get("WORKBENCH_VISUAL_VARIANT", "compact")
         if not (cls.package_dir / "metadata.json").is_file():
             raise RuntimeError(f"Invalid plasmoid package directory: {cls.package_dir}")
 
@@ -73,6 +75,7 @@ class WorkbenchEndToEndTest(unittest.TestCase):
                 "LC_ALL": "en_US.UTF-8",
                 "QT_LINUX_ACCESSIBILITY_ALWAYS_ON": "1",
                 "QT_LOGGING_RULES": "qt.accessibility.atspi.warning=false",
+                "QT_SCALE_FACTOR": os.environ.get("WORKBENCH_SCALE_FACTOR", "1"),
             },
         )
         cls.driver = webdriver.Remote(command_executor=APPIUM_SERVER_URL, options=options)
@@ -102,6 +105,22 @@ class WorkbenchEndToEndTest(unittest.TestCase):
         return self.wait.until(
             conditions.presence_of_element_located((AppiumBy.NAME, name))
         )
+
+    def capture_screenshot(self, state: str) -> None:
+        artifact_dir = Path(os.environ.get("APPIUM_ARTIFACT_OUTPUT_PATH", "."))
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        screenshot_path = artifact_dir / f"daily-editor-{self.variant}-{state}.png"
+        self.assertTrue(self.driver.get_screenshot_as_file(str(screenshot_path)))
+
+    def assert_contained(self, parent: WebElement, child: WebElement) -> None:
+        parent_rect = parent.rect
+        child_rect = child.rect
+        self.assertGreaterEqual(child_rect["x"], parent_rect["x"] - 1)
+        self.assertGreaterEqual(child_rect["y"], parent_rect["y"] - 1)
+        self.assertLessEqual(child_rect["x"] + child_rect["width"],
+                             parent_rect["x"] + parent_rect["width"] + 1)
+        self.assertLessEqual(child_rect["y"] + child_rect["height"],
+                             parent_rect["y"] + parent_rect["height"] + 1)
 
     def create_category(self) -> None:
         self.element("Create category").click()
@@ -168,6 +187,39 @@ class WorkbenchEndToEndTest(unittest.TestCase):
                 (AppiumBy.XPATH, "//*[contains(@name, '15-minute work-session timeline for')]")
             )
         )
+
+        add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
+        add_button.click()
+        editor = self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.ACCESSIBILITY_ID, "daily-session-editor")
+            )
+        )
+        start_field = editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-start")
+        editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-end")
+        for field_id in ("daily-session-start-date", "daily-session-start",
+                         "daily-session-end-date", "daily-session-end"):
+            self.assert_contained(
+                editor,
+                editor.find_element(AppiumBy.ACCESSIBILITY_ID, field_id),
+            )
+        self.wait.until(lambda _driver: start_field.is_selected())
+        self.capture_screenshot("editing")
+        editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-save").click()
+        self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.XPATH, "//*[contains(@accessibility-id, 'timeline-session-')]")
+            )
+        )
+        self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.XPATH, "//*[starts-with(@name, 'Total:') and not(contains(@name, '00:00:00'))]")
+            )
+        )
+        add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
+        self.wait.until(lambda _driver: add_button.is_selected())
+        self.capture_screenshot("populated")
+
         self.close_report(reports_page)
         baseline_rss = plasmawindowed_rss_kib(self.package_dir)
 

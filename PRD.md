@@ -220,6 +220,11 @@ Priority uses `P0` for release-blocking behavior, `P1` for important version 1 b
 | REPORT-007 | P1 | Reports display totals by date, task, and category. |
 | REPORT-008 | P1 | Report totals include manual corrections. |
 | REPORT-009 | P2 | The user can export a report as CSV. |
+| REPORT-010 | P1 | The Day report displays a full local day as timezone-aware 15-minute slots. |
+| REPORT-011 | P1 | The Day report provides explicit controls to add, select, edit, and cancel a work-session draft. |
+| REPORT-012 | P1 | The Day report requires the user to select a UTC offset when a local time occurs twice during a daylight-saving transition. |
+| REPORT-013 | P1 | The Year report displays daily tracked time as a calendar-year contribution heatmap. |
+| REPORT-014 | P1 | Report navigation and year-to-day drill-down preserve the selected category scope. |
 
 ### 8.6 Preferences
 
