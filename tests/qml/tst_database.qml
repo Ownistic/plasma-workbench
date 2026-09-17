@@ -367,6 +367,45 @@ TestCase {
         compare(report.totalSeconds, 4 * 60 * 60)
         compare(report.byCategory[0].id, category.id)
         compare(report.byCategory[0].seconds, 4 * 60 * 60)
+        compare(report.sessionSegments.length, 1)
+        compare(report.sessionSegments[0].localDate, "2024-01-02")
+        compare(report.sessionSegments[0].taskId, task.id)
+    }
+
+    function test_dailyReportFiltersCategoryBeforeAggregation() {
+        const firstCategory = createCategory("Product")
+        const secondCategory = createCategory("Operations")
+        const firstTask = createTask(firstCategory.id, "Product task")
+        const secondTask = createTask(secondCategory.id, "Operations task")
+        Database.createWorkSession({
+            taskId: firstTask.id,
+            startedAtUtc: "2024-01-02T09:00:00.000Z",
+            endedAtUtc: "2024-01-02T10:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+        Database.createWorkSession({
+            taskId: secondTask.id,
+            startedAtUtc: "2024-01-02T10:00:00.000Z",
+            endedAtUtc: "2024-01-02T12:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+
+        const report = Reports.dailyReport(WorkbenchTime.TimeMath, {
+            year: 2024,
+            month: 1,
+            day: 2,
+            timezoneId: "Etc/UTC",
+            currentUtc: "2024-01-03T00:00:00.000Z",
+            categoryId: firstCategory.id
+        })
+
+        compare(report.totalSeconds, 60 * 60)
+        compare(report.byCategory.length, 1)
+        compare(report.byCategory[0].id, firstCategory.id)
+        compare(report.byTask.length, 1)
+        compare(report.byTask[0].id, firstTask.id)
+        compare(report.sessionSegments.length, 1)
+        compare(report.sessionSegments[0].categoryId, firstCategory.id)
     }
 
     function test_categoryTimeMergesOverlappingTaskSessions() {
@@ -607,11 +646,18 @@ TestCase {
             firstDayOfWeek: 1,
             timezoneId: "America/New_York"
         })
+        const yearly = Reports.yearlyReport(WorkbenchTime.TimeMath, {
+            year: 2024,
+            firstDayOfWeek: 1,
+            timezoneId: "America/New_York"
+        })
 
         compare(weekly.totalSeconds, 0)
         compare(weekly.byDate.length, 7)
         compare(monthly.totalSeconds, 0)
         compare(monthly.byDate.length, 29)
         compare(monthly.byWeek.length, 5)
+        compare(yearly.totalSeconds, 0)
+        compare(yearly.byDate.length, 366)
     }
 }

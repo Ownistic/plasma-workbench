@@ -12,6 +12,7 @@ private slots:
     void calculatesDayRange();
     void calculatesWeekRange();
     void calculatesMonthRange();
+    void calculatesYearRange();
     void convertsUtcToLocalDate();
     void convertsUtcToLocalParts();
     void resolvesNormalLocalTime();
@@ -89,6 +90,16 @@ void TimeMathTest::calculatesMonthRange()
     QVERIFY(range.value(QStringLiteral("valid")).toBool());
     QCOMPARE(range.value(QStringLiteral("startUtc")).toString(), QStringLiteral("2024-02-29T23:00:00.000Z"));
     QCOMPARE(range.value(QStringLiteral("endUtc")).toString(), QStringLiteral("2024-03-31T22:00:00.000Z"));
+}
+
+void TimeMathTest::calculatesYearRange()
+{
+    TimeMath timeMath;
+    const QVariantMap range = timeMath.yearRange(2024, QStringLiteral("Europe/Berlin"));
+
+    QVERIFY(range.value(QStringLiteral("valid")).toBool());
+    QCOMPARE(range.value(QStringLiteral("startUtc")).toString(), QStringLiteral("2023-12-31T23:00:00.000Z"));
+    QCOMPARE(range.value(QStringLiteral("endUtc")).toString(), QStringLiteral("2024-12-31T23:00:00.000Z"));
 }
 
 void TimeMathTest::convertsUtcToLocalDate()

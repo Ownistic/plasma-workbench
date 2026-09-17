@@ -244,6 +244,26 @@ QVariantMap TimeMath::monthRange(int year, int month, const QString &timeZoneId)
     return rangeResult(start, end, timeZone);
 }
 
+QVariantMap TimeMath::yearRange(int year, const QString &timeZoneId) const
+{
+    const QDate startDate(year, 1, 1);
+    if (!startDate.isValid()) {
+        return invalidResult(QStringLiteral("The local year is invalid."));
+    }
+
+    QTimeZone timeZone;
+    if (!timeZoneForId(timeZoneId, &timeZone)) {
+        return invalidResult(QStringLiteral("The time zone ID is invalid."));
+    }
+
+    const QDateTime start = localMidnight(startDate, timeZone);
+    const QDateTime end = localMidnight(startDate.addYears(1), timeZone);
+    if (!start.isValid() || !end.isValid() || start >= end) {
+        return invalidResult(QStringLiteral("The local year does not map to a valid UTC range."));
+    }
+    return rangeResult(start, end, timeZone);
+}
+
 QVariantList TimeMath::splitInterval(const QString &startUtc, const QString &endUtc,
                                      const QString &reportStartUtc, const QString &reportEndUtc,
                                      const QString &timeZoneId) const

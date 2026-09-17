@@ -6,6 +6,7 @@ import org.kde.plasma.components as PlasmaComponents
 
 import "../code/Database.js" as Database
 import "../code/Markdown.js" as Markdown
+import "../code/Reports.js" as Reports
 import "time" as WorkbenchTime
 
 FocusScope {
@@ -21,6 +22,8 @@ FocusScope {
     property bool showDescriptionPreview: false
     property bool manualSessionOpen: false
     property bool manualSessionLongConfirmed: false
+    property var dailyTimelineReport: null
+    property string dailyTimelineDate: ""
     readonly property bool hasUnsavedChanges: root.task && (
         titleField.text !== root.loadedTitle
         || descriptionField.text !== root.loadedDescription
@@ -54,6 +57,7 @@ FocusScope {
         root.loadedDescription = root.task.details
         root.loadedCategoryId = root.task.category_id
         root.loadedStatus = root.task.status
+        root.refreshDailyTimeline()
         showDescriptionPreview = false
         statusField.currentIndex = statusField.indexOfValue(root.task.status)
         categoryField.currentIndex = -1
@@ -104,6 +108,49 @@ FocusScope {
     function refreshTask() {
         root.task = Database.getTask(root.taskId)
         root.board.reload()
+        root.refreshDailyTimeline()
+    }
+
+    function refreshDailyTimeline() {
+        if (!root.task) {
+            root.dailyTimelineReport = null
+            return
+        }
+        const local = WorkbenchTime.TimeMath.localPartsForUtc(new Date().toISOString(), root.board.reportTimezone)
+        if (!local.valid) {
+            root.dailyTimelineReport = null
+            return
+        }
+        root.dailyTimelineDate = local.date
+        const pieces = root.dailyTimelineDate.split("-")
+        root.dailyTimelineReport = Reports.dailyReport(WorkbenchTime.TimeMath, {
+            year: Number(pieces[0]), month: Number(pieces[1]), day: Number(pieces[2]),
+            timezoneId: root.board.reportTimezone, firstDayOfWeek: root.board.firstDayOfWeek,
+            currentUtc: new Date().toISOString()
+        })
+        root.dailyTimelineReport.sessionSegments = root.dailyTimelineReport.sessionSegments.filter(function(segment) {
+            return segment.taskId === root.taskId
+        })
+    }
+
+    function saveTimelineSession(startUtc, endUtc) {
+        try {
+            Database.createWorkSession({ taskId: root.taskId, startedAtUtc: startUtc,
+                endedAtUtc: endUtc, timezoneId: root.board.reportTimezone })
+            root.refreshTask()
+        } catch (error) {
+            correctionError.text = error.message
+        }
+    }
+
+    function saveTimelineEdit(segment, startUtc, endUtc) {
+        try {
+            Database.updateWorkSession({ id: segment.sessionId, startedAtUtc: startUtc,
+                endedAtUtc: endUtc, timezoneId: root.board.reportTimezone })
+            root.refreshTask()
+        } catch (error) {
+            correctionError.text = error.message
+        }
     }
 
     function openWorkSessionEditor(session) {
@@ -545,6 +592,37 @@ FocusScope {
                 Layout.fillWidth: true
                 text: i18n("Report timezone: %1", root.board.reportTimezone)
                 wrapMode: Text.Wrap
+            }
+
+            Loader {
+                id: taskDailyTimelineLoader
+                objectName: "task-daily-timeline-loader"
+                Layout.fillWidth: true
+                Layout.preferredHeight: item ? item.implicitHeight : 0
+                active: root.visible && root.dailyTimelineReport !== null
+                sourceComponent: Component {
+                    DailyTimeline {
+                        objectName: "task-daily-timeline"
+                        report: root.dailyTimelineReport
+                        localDate: root.dailyTimelineDate
+                        timezoneId: root.board.reportTimezone
+                        formatSeconds: root.board.formatSeconds
+                        onSessionCreateRequested: function(startUtc, endUtc) {
+                            root.saveTimelineSession(startUtc, endUtc)
+                        }
+                        onSessionEditRequested: function(segment, startUtc, endUtc) {
+                            root.saveTimelineEdit(segment, startUtc, endUtc)
+                        }
+                        onSessionSelected: function(segment) {
+                            const session = root.task.workSessions.find(function(candidate) {
+                                return candidate.id === segment.sessionId
+                            })
+                            if (session) {
+                                root.openWorkSessionEditor(session)
+                            }
+                        }
+                    }
+                }
             }
 
             PlasmaComponents.Label {

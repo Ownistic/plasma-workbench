@@ -103,17 +103,26 @@ Item {
     function refreshCategoryTimes() {
         const now = new Date()
         const localParts = WorkbenchTime.TimeMath.localPartsForUtc(now.toISOString(), root.reportTimezone)
-        if (!localParts.valid) {
+        const year = Number(localParts.year)
+        const month = Number(localParts.month)
+        const day = Number(localParts.day)
+        if (!localParts.valid || !Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)
+                || month < 1 || month > 12 || day < 1 || day > 31) {
             return
         }
-        const report = Reports.dailyReport(WorkbenchTime.TimeMath, {
-            year: localParts.year,
-            month: localParts.month,
-            day: localParts.day,
-            timezoneId: root.reportTimezone,
-            firstDayOfWeek: root.firstDayOfWeek,
-            currentUtc: now.toISOString()
-        })
+        let report
+        try {
+            report = Reports.dailyReport(WorkbenchTime.TimeMath, {
+                year: year,
+                month: month,
+                day: day,
+                timezoneId: root.reportTimezone,
+                firstDayOfWeek: root.firstDayOfWeek,
+                currentUtc: now.toISOString()
+            })
+        } catch (error) {
+            return
+        }
         const todayTotals = {}
         for (let index = 0; index < report.byCategory.length; index += 1) {
             const category = report.byCategory[index]
@@ -201,6 +210,16 @@ Item {
         return formatted.valid ? formatted.formatted : utc
     }
 
+    function currentLocalDate() {
+        const local = WorkbenchTime.TimeMath.localPartsForUtc(new Date().toISOString(), root.reportTimezone)
+        return local.valid ? local.date : ""
+    }
+
+    function openDailyTimeline(categoryId, taskId, date) {
+        reportsPage.openDailyReport(categoryId || "", taskId || "", date || "")
+        root.currentPage = "reports"
+    }
+
     function reload() {
         const tasks = Database.listTasks({
             statuses: root.selectedStatuses,
@@ -257,6 +276,16 @@ Item {
     }
 
     function closeSettings() {
+        root.currentPage = "board"
+    }
+
+    function openReports(showMonthly) {
+        reportsPage.openReport(showMonthly)
+        root.currentPage = "reports"
+    }
+
+    function closeReports() {
+        reportsPage.clearReport()
         root.currentPage = "board"
     }
 
@@ -584,11 +613,17 @@ Item {
             }
 
             PlasmaComponents.Label {
+                id: activeTimeDisplay
+                objectName: "daily-timeline-header"
                 text: root.hasActiveSession
                     ? (root.activeSessions.length === 1 ? root.activeElapsedText
                         : i18np("%1 timer", "%1 timers", root.activeSessions.length))
                     : i18n("No timer")
                 Accessible.name: root.activeTaskSummary
+
+                TapHandler {
+                    onTapped: root.openDailyTimeline()
+                }
             }
 
             PlasmaComponents.ToolButton {
@@ -618,7 +653,7 @@ Item {
             PlasmaComponents.ToolButton {
                 icon.name: "office-chart-bar"
                 Accessible.name: i18n("Open reports")
-                onClicked: reportsDialog.openReport(false)
+                onClicked: root.openReports(false)
             }
 
             PlasmaComponents.ToolButton {
@@ -836,6 +871,7 @@ Item {
                                 timeText: root.categoryTimeText(model.id)
                                 showingTotalTime: root.totalTimeCategories[model.id] === true
                                 onTimeDisplayToggleRequested: root.toggleCategoryTimeDisplay(model.id)
+                                onDailyTimelineRequested: root.openDailyTimeline(model.id)
                                 onCollapseRequested: {
                                     Database.updateCategory({ id: model.id, collapsed: model.collapsed === 0 })
                                     root.reload()
@@ -1229,6 +1265,15 @@ Item {
         board: root
         plasmoidConfiguration: root.plasmoidConfiguration
         onBackRequested: root.closeSettings()
+    }
+
+    ReportsView {
+        id: reportsPage
+        objectName: "reports-page"
+        anchors.fill: parent
+        visible: root.currentPage === "reports"
+        board: root
+        onBackRequested: root.closeReports()
     }
 
     Controls.Dialog {
@@ -1659,8 +1704,4 @@ Item {
         board: root
     }
 
-    ReportsView {
-        id: reportsDialog
-        board: root
-    }
 }

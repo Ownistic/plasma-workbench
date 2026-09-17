@@ -210,4 +210,41 @@ TestCase {
         timeButton.click()
         tryVerify(function() { return timeButton.text.indexOf("Today: ") === 0 }, 1000)
     }
+
+    function test_categoryDailyReportUsesBoundedLazyPage() {
+        const category = Database.listCategories()[0]
+        const reportsPage = findChild(board, "reports-page")
+        const dayLoader = findChild(board, "day-report-loader")
+        const yearLoader = findChild(board, "year-report-loader")
+        verify(reportsPage !== null)
+        verify(dayLoader !== null)
+        verify(yearLoader !== null)
+
+        for (let iteration = 0; iteration < 10; iteration += 1) {
+            board.openDailyTimeline(category.id)
+            compare(board.currentPage, "reports")
+            verify(reportsPage.report !== null)
+            compare(dayLoader.active, true)
+            tryVerify(function() { return dayLoader.item !== null }, 5000)
+            const timeline = findChild(reportsPage, "daily-report-timeline")
+            verify(timeline !== null)
+            verify(timeline.validRange)
+            compare(timeline.slotCount, 96)
+            verify(timeline.hourMarkerCount <= 25)
+            compare(yearLoader.item, null)
+
+            board.closeReports()
+            compare(board.currentPage, "board")
+            tryCompare(dayLoader, "item", null, 5000)
+            compare(reportsPage.report, null)
+        }
+
+        board.openReports(false)
+        reportsPage.selectPeriod(3, true)
+        tryVerify(function() { return yearLoader.item !== null }, 5000)
+        compare(dayLoader.item, null)
+        verify(yearLoader.item.days.length === 365 || yearLoader.item.days.length === 366)
+        board.closeReports()
+        tryCompare(yearLoader, "item", null, 5000)
+    }
 }

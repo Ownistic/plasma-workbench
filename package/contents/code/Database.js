@@ -956,25 +956,35 @@ function deleteWorkSession(sessionId) {
     })
 }
 
-function listReportSessions(periodStartUtc, periodEndUtc, currentUtc) {
+function listReportSessions(periodStartUtc, periodEndUtc, currentUtc, filter) {
     periodStartUtc = requireUtcInstant(periodStartUtc, "Report start")
     periodEndUtc = requireUtcInstant(periodEndUtc, "Report end")
     const activeEndUtc = requireUtcInstant(currentUtc || nowUtc(), "Report end")
+    filter = filter || {}
     purgeExpiredTrash()
     return read(function(tx) {
-        return rows(tx.executeSql(
+        let query =
             "SELECT work_sessions.id AS sessionId, work_sessions.task_id AS taskId, tasks.title AS taskTitle, " +
             "categories.id AS categoryId, categories.name AS categoryName, categories.color AS categoryColor, " +
             "work_sessions.started_at_utc AS startedAtUtc, " +
             "COALESCE(work_sessions.ended_at_utc, ?) AS endedAtUtc, work_sessions.timezone_id AS timezoneId, " +
-            "work_sessions.manually_edited AS manuallyEdited " +
+            "work_sessions.manually_edited AS manuallyEdited, " +
+            "work_sessions.ended_at_utc IS NULL AS active " +
             "FROM work_sessions JOIN tasks ON tasks.id = work_sessions.task_id " +
             "JOIN categories ON categories.id = tasks.category_id " +
             "WHERE work_sessions.started_at_utc < ? " +
-            "AND COALESCE(work_sessions.ended_at_utc, ?) > ? " +
-            "ORDER BY work_sessions.started_at_utc, work_sessions.id",
-            [activeEndUtc, periodEndUtc, activeEndUtc, periodStartUtc]
-        ))
+            "AND COALESCE(work_sessions.ended_at_utc, ?) > ? "
+        const parameters = [activeEndUtc, periodEndUtc, activeEndUtc, periodStartUtc]
+        if (filter.categoryId) {
+            query += "AND categories.id = ? "
+            parameters.push(filter.categoryId)
+        }
+        if (filter.taskId) {
+            query += "AND tasks.id = ? "
+            parameters.push(filter.taskId)
+        }
+        query += "ORDER BY work_sessions.started_at_utc, work_sessions.id"
+        return rows(tx.executeSql(query, parameters))
     })
 }
 

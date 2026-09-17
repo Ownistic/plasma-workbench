@@ -82,13 +82,14 @@ function weekStart(date, firstDayOfWeek) {
     return cursor.toISOString().slice(0, 10)
 }
 
-function aggregate(timeMath, range, timezoneId, currentUtc, firstDayOfWeek) {
-    const sessions = Database.listReportSessions(range.startUtc, range.endUtc, currentUtc)
+function aggregate(timeMath, range, timezoneId, currentUtc, firstDayOfWeek, filter) {
+    const sessions = Database.listReportSessions(range.startUtc, range.endUtc, currentUtc, filter)
     const dates = {}
     const categoryIntervals = {}
     const tasks = {}
     const dailyCategoryIntervals = {}
     const dailyTasks = {}
+    const sessionSegments = []
     const weeks = {}
     let totalSeconds = 0
 
@@ -128,6 +129,21 @@ function aggregate(timeMath, range, timezoneId, currentUtc, firstDayOfWeek) {
             addInterval(dailyCategoryIntervals[segment.localDate], session.categoryId, session.categoryName,
                 session.categoryColor, segment.startUtc, segment.endUtc)
             addTotal(dailyTasks[segment.localDate], session.taskId, session.taskTitle, "", seconds)
+            sessionSegments.push({
+                sessionId: session.sessionId,
+                taskId: session.taskId,
+                taskTitle: session.taskTitle,
+                categoryId: session.categoryId,
+                categoryName: session.categoryName,
+                categoryColor: session.categoryColor,
+                startUtc: segment.startUtc,
+                endUtc: segment.endUtc,
+                sessionStartUtc: session.startedAtUtc,
+                sessionEndUtc: session.endedAtUtc,
+                localDate: segment.localDate,
+                manuallyEdited: session.manuallyEdited,
+                active: session.active
+            })
         }
     }
 
@@ -141,13 +157,16 @@ function aggregate(timeMath, range, timezoneId, currentUtc, firstDayOfWeek) {
     return {
         startUtc: range.startUtc,
         endUtc: range.endUtc,
+        startDate: range.startDate,
+        endDateExclusive: range.endDateExclusive,
         totalSeconds: totalSeconds,
         byDate: byDate,
         byWeek: orderedTotals(weeks).sort(function(left, right) { return left.id.localeCompare(right.id) }),
         byCategory: orderedTotals(mergedTotals(categoryIntervals)),
         byTask: orderedTotals(tasks),
         dailyByCategory: dailyByCategory,
-        dailyByTask: dailyByTask
+        dailyByTask: dailyByTask,
+        sessionSegments: sessionSegments
     }
 }
 
@@ -158,7 +177,7 @@ function dailyReport(timeMath, input) {
         throw new Error(range.error)
     }
     return aggregate(timeMath, range, input.timezoneId, input.currentUtc,
-        input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek)
+        input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek, input)
 }
 
 function weeklyReport(timeMath, input) {
@@ -173,7 +192,8 @@ function weeklyReport(timeMath, input) {
     if (!range.valid) {
         throw new Error(range.error)
     }
-    return aggregate(timeMath, range, input.timezoneId, input.currentUtc, input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek)
+    return aggregate(timeMath, range, input.timezoneId, input.currentUtc,
+        input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek, input)
 }
 
 function monthlyReport(timeMath, input) {
@@ -182,5 +202,16 @@ function monthlyReport(timeMath, input) {
     if (!range.valid) {
         throw new Error(range.error)
     }
-    return aggregate(timeMath, range, input.timezoneId, input.currentUtc, input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek)
+    return aggregate(timeMath, range, input.timezoneId, input.currentUtc,
+        input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek, input)
+}
+
+function yearlyReport(timeMath, input) {
+    input = input || {}
+    const range = timeMath.yearRange(input.year, input.timezoneId)
+    if (!range.valid) {
+        throw new Error(range.error)
+    }
+    return aggregate(timeMath, range, input.timezoneId, input.currentUtc,
+        input.firstDayOfWeek === undefined ? 1 : input.firstDayOfWeek, input)
 }

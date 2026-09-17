@@ -33,6 +33,7 @@ public:
                                        int firstDayOfWeek = 1) const;
     Q_INVOKABLE QVariantMap monthRange(int year, int month,
                                        const QString &timeZoneId) const;
+    Q_INVOKABLE QVariantMap yearRange(int year, const QString &timeZoneId) const;
     Q_INVOKABLE QVariantList splitInterval(const QString &startUtc,
                                            const QString &endUtc,
                                            const QString &reportStartUtc,

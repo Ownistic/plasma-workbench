@@ -18,6 +18,7 @@ PlasmaExtras.ListSectionHeader {
     signal deleteRequested()
     signal collapseRequested()
     signal timeDisplayToggleRequested()
+    signal dailyTimelineRequested()
     signal dragStarted(var dragItem, var dragGroup)
     signal dragPositionChanged(var dragItem)
     signal dragPreviewRequested(string sourceCategoryId, string placement, var targetItem)
@@ -62,6 +63,13 @@ PlasmaExtras.ListSectionHeader {
             Controls.ToolTip.text: root.showingTotalTime
                 ? i18n("Show today's tracked time") : i18n("Show total tracked time")
             onClicked: root.timeDisplayToggleRequested()
+        }
+
+        PlasmaComponents.ToolButton {
+            objectName: "category-timeline-" + root.categoryId
+            icon.name: "view-calendar-day"
+            Accessible.name: i18n("Open daily timeline for %1", root.categoryName)
+            onClicked: root.dailyTimelineRequested()
         }
 
         PlasmaComponents.ToolButton {
