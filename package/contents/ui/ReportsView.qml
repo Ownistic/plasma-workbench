@@ -474,7 +474,7 @@ FocusScope {
             PlasmaComponents.Label {
                 Layout.fillWidth: true
                 text: drawSessionButton.checked
-                    ? i18n("Drag across the timeline to choose a start and end time.")
+                    ? i18n("Drag across the timeline to choose a start and end time. Use its scrollbar to reposition.")
                     : (root.report && root.report.totalSeconds === 0
                         ? i18n("No sessions yet. Add one precisely, or draw it on the timeline.")
                         : i18n("Scroll across the full day. Select a session to edit it."))

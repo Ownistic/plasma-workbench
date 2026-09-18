@@ -12,9 +12,12 @@ Item {
     property bool editable: true
     property bool creationEnabled: editable
     property var formatSeconds: function(seconds) { return Math.round(seconds / 60) + " min" }
-    property real slotWidth: Kirigami.Units.gridUnit * 0.85
+    readonly property var zoomFactors: [0.75, 1, 1.5, 2, 3]
+    readonly property int defaultZoomIndex: 3
+    property int zoomIndex: defaultZoomIndex
+    readonly property real zoomFactor: zoomFactors[Math.max(0, Math.min(zoomFactors.length - 1, zoomIndex))]
+    readonly property real slotWidth: Kirigami.Units.gridUnit * zoomFactor
     property real laneHeight: Kirigami.Units.gridUnit * 1.35
-    property int lanes: 1
     property double currentMilliseconds: Date.now()
     readonly property double startMilliseconds: report ? Date.parse(report.startUtc) : 0
     readonly property double endMilliseconds: report ? Date.parse(report.endUtc) : 0
@@ -27,7 +30,13 @@ Item {
         : report.sessionSegments.filter(function(segment) {
         return segment.localDate === root.localDate
     })
-    implicitHeight: Math.max(laneHeight + Kirigami.Units.gridUnit * 3, Kirigami.Units.gridUnit * 5)
+    readonly property var segmentLayout: buildSegmentLayout()
+    readonly property int laneCount: Math.max(1, segmentLayout.laneCount)
+    readonly property int displayedLaneCount: Math.max(laneCount,
+        createArea.dragging ? createArea.previewLane + 1 : 1)
+    readonly property real trackHeight: displayedLaneCount * laneHeight
+    readonly property real rulerHeight: Kirigami.Units.gridUnit * 1.4
+    implicitHeight: zoomControls.height + Kirigami.Units.smallSpacing + trackHeight + rulerHeight
     implicitWidth: Math.max(Kirigami.Units.gridUnit * 24, slotCount * slotWidth)
     Accessible.name: i18n("15-minute work-session timeline for %1", localDate)
     Accessible.role: Accessible.Graphic
@@ -50,6 +59,114 @@ Item {
 
     function segmentWidth(segment) {
         return Math.max(3, (Date.parse(segment.endUtc) - Date.parse(segment.startUtc)) / (15 * 60 * 1000) * slotWidth)
+    }
+
+    function buildSegmentLayout() {
+        const ordered = segments.slice().sort(function(left, right) {
+            const startDifference = Date.parse(left.startUtc) - Date.parse(right.startUtc)
+            if (startDifference !== 0) {
+                return startDifference
+            }
+            const endDifference = Date.parse(right.endUtc) - Date.parse(left.endUtc)
+            if (endDifference !== 0) {
+                return endDifference
+            }
+            return String(left.sessionId).localeCompare(String(right.sessionId))
+        })
+        const laneEnds = []
+        const entries = []
+        for (let index = 0; index < ordered.length; index += 1) {
+            const segment = ordered[index]
+            const start = Date.parse(segment.startUtc)
+            const end = Date.parse(segment.endUtc)
+            let lane = laneEnds.length
+            for (let candidate = 0; candidate < laneEnds.length; candidate += 1) {
+                if (laneEnds[candidate] <= start) {
+                    lane = candidate
+                    break
+                }
+            }
+            laneEnds[lane] = end
+            entries.push({ segment: segment, lane: lane })
+        }
+        return { entries: entries, laneCount: laneEnds.length }
+    }
+
+    function laneForInterval(startUtc, endUtc) {
+        const start = Date.parse(startUtc)
+        const end = Date.parse(endUtc)
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+            return 0
+        }
+        for (let lane = 0; lane < laneCount; lane += 1) {
+            let overlaps = false
+            for (let index = 0; index < segmentLayout.entries.length; index += 1) {
+                const entry = segmentLayout.entries[index]
+                if (entry.lane !== lane) {
+                    continue
+                }
+                if (start < Date.parse(entry.segment.endUtc) && end > Date.parse(entry.segment.startUtc)) {
+                    overlaps = true
+                    break
+                }
+            }
+            if (!overlaps) {
+                return lane
+            }
+        }
+        return laneCount
+    }
+
+    function changeZoom(change) {
+        const nextIndex = Math.max(0, Math.min(zoomFactors.length - 1, zoomIndex + change))
+        if (nextIndex === zoomIndex) {
+            return
+        }
+        const centerSlot = (flickable.contentX + flickable.width / 2) / slotWidth
+        zoomIndex = nextIndex
+        Qt.callLater(function() {
+            flickable.contentX = Math.max(0, Math.min(flickable.contentWidth - flickable.width,
+                centerSlot * root.slotWidth - flickable.width / 2))
+        })
+    }
+
+    function resetZoom() {
+        changeZoom(defaultZoomIndex - zoomIndex)
+    }
+
+    function beginDrawing(x) {
+        if (!creationEnabled || !validRange) {
+            return
+        }
+        createArea.pressX = x
+        createArea.currentX = x
+        createArea.dragging = true
+        createArea.updatePreview()
+    }
+
+    function updateDrawing(x) {
+        if (createArea.dragging) {
+            createArea.currentX = x
+            createArea.updatePreview()
+        }
+    }
+
+    function cancelDrawing() {
+        createArea.dragging = false
+    }
+
+    function completeDrawing(x) {
+        if (!createArea.dragging) {
+            return
+        }
+        const startX = Math.min(createArea.pressX, x)
+        const endX = Math.max(createArea.pressX, x) + (Math.abs(x - createArea.pressX) < 3 ? slotWidth : 0)
+        const startUtc = snappedUtcAt(startX)
+        const endUtc = snappedUtcAt(endX)
+        createArea.dragging = false
+        if (Date.parse(endUtc) > Date.parse(startUtc)) {
+            sessionCreateRequested(startUtc, endUtc)
+        }
     }
 
     function localTime(utc) {
@@ -83,14 +200,50 @@ Item {
 
     Component.onCompleted: Qt.callLater(root.revealCurrentTime)
 
+    Row {
+        id: zoomControls
+        anchors.top: parent.top
+        anchors.right: parent.right
+        spacing: Kirigami.Units.smallSpacing
+
+        Controls.ToolButton {
+            objectName: "daily-timeline-zoom-out"
+            icon.name: "zoom-out"
+            enabled: root.zoomIndex > 0
+            Accessible.name: i18n("Zoom out timeline")
+            onClicked: root.changeZoom(-1)
+        }
+
+        Controls.ToolButton {
+            objectName: "daily-timeline-zoom-reset"
+            text: i18n("%1%", Math.round(root.zoomFactor * 100))
+            enabled: root.zoomIndex !== root.defaultZoomIndex
+            Accessible.name: i18n("Reset timeline zoom to %1%", Math.round(root.zoomFactors[root.defaultZoomIndex] * 100))
+            onClicked: root.resetZoom()
+        }
+
+        Controls.ToolButton {
+            objectName: "daily-timeline-zoom-in"
+            icon.name: "zoom-in"
+            enabled: root.zoomIndex < root.zoomFactors.length - 1
+            Accessible.name: i18n("Zoom in timeline")
+            onClicked: root.changeZoom(1)
+        }
+    }
+
     Flickable {
         id: flickable
         objectName: "daily-timeline-flickable"
-        anchors.fill: parent
+        anchors.top: zoomControls.bottom
+        anchors.topMargin: Kirigami.Units.smallSpacing
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
         clip: true
         contentWidth: root.implicitWidth
-        contentHeight: root.implicitHeight
+        contentHeight: root.trackHeight + root.rulerHeight
         boundsBehavior: Flickable.StopAtBounds
+        interactive: !root.creationEnabled
 
         Controls.ScrollBar.horizontal: Controls.ScrollBar {
             objectName: "daily-timeline-scrollbar"
@@ -109,7 +262,7 @@ Item {
                     required property int index
                     x: index * root.slotWidth
                     width: 1
-                    height: parent.height - Kirigami.Units.gridUnit * 1.4
+                    height: root.trackHeight
                     color: index % 4 === 0 ? Kirigami.Theme.disabledTextColor : Kirigami.Theme.textColor
                     opacity: index % 4 === 0 ? 0.35 : 0.1
                 }
@@ -127,13 +280,13 @@ Item {
                     Rectangle {
                         anchors.top: parent.top
                         width: 1
-                        height: parent.height - Kirigami.Units.gridUnit
+                        height: root.trackHeight
                         color: Kirigami.Theme.disabledTextColor
                         opacity: 0.35
                     }
 
                     Controls.Label {
-                        anchors.bottom: parent.bottom
+                        y: root.trackHeight
                         width: parent.width
                         horizontalAlignment: Text.AlignLeft
                         text: {
@@ -153,7 +306,7 @@ Item {
                 readonly property real endX: Math.max(createArea.pressX, createArea.currentX)
                 visible: createArea.dragging
                 x: Math.round(startX / root.slotWidth) * root.slotWidth
-                y: Kirigami.Units.smallSpacing
+                y: createArea.previewLane * root.laneHeight + Kirigami.Units.smallSpacing
                 width: Math.max(root.slotWidth,
                     Math.round((endX - startX) / root.slotWidth) * root.slotWidth)
                 height: root.laneHeight - Kirigami.Units.smallSpacing * 2
@@ -162,37 +315,33 @@ Item {
                 opacity: 0.45
                 border.width: 1
                 border.color: Kirigami.Theme.highlightedTextColor
-                z: 2
+                z: 5
             }
 
             MouseArea {
                 id: createArea
+                objectName: "daily-timeline-create-area"
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                height: parent.height - Kirigami.Units.gridUnit
+                height: root.trackHeight
                 enabled: root.creationEnabled && root.validRange
                 property real pressX: 0
                 property real currentX: 0
                 property bool dragging: false
+                property int previewLane: 0
                 cursorShape: Qt.CrossCursor
-                onPressed: {
-                    pressX = mouse.x
-                    currentX = mouse.x
-                    dragging = true
+                preventStealing: true
+                z: root.creationEnabled ? 4 : 0
+                function updatePreview() {
+                    const startUtc = root.snappedUtcAt(Math.min(pressX, currentX))
+                    const endUtc = root.snappedUtcAt(Math.max(pressX, currentX) + root.slotWidth)
+                    previewLane = root.laneForInterval(startUtc, endUtc)
                 }
-                onPositionChanged: currentX = mouse.x
-                onCanceled: dragging = false
-                onReleased: {
-                    const startX = Math.min(pressX, mouse.x)
-                    const endX = Math.max(pressX, mouse.x) + (Math.abs(mouse.x - pressX) < 3 ? root.slotWidth : 0)
-                    const startUtc = root.snappedUtcAt(startX)
-                    const endUtc = root.snappedUtcAt(endX)
-                    dragging = false
-                    if (Date.parse(endUtc) > Date.parse(startUtc)) {
-                        root.sessionCreateRequested(startUtc, endUtc)
-                    }
-                }
+                onPressed: root.beginDrawing(mouse.x)
+                onPositionChanged: root.updateDrawing(mouse.x)
+                onCanceled: root.cancelDrawing()
+                onReleased: root.completeDrawing(mouse.x)
             }
 
             Rectangle {
@@ -201,7 +350,7 @@ Item {
                 x: (root.currentMilliseconds - root.startMilliseconds) / (15 * 60 * 1000) * root.slotWidth
                 y: 0
                 width: 2
-                height: parent.height - Kirigami.Units.gridUnit
+                height: root.trackHeight
                 color: Kirigami.Theme.negativeTextColor
                 z: 3
 
@@ -219,47 +368,55 @@ Item {
             }
 
             Repeater {
-                model: root.segments
+                model: root.segmentLayout.entries
 
                 delegate: Rectangle {
+                    id: sessionBlock
                     required property var modelData
-                    x: root.segmentX(modelData)
-                    y: Kirigami.Units.smallSpacing
-                    width: root.segmentWidth(modelData)
+                    readonly property var segment: modelData.segment
+                    x: root.segmentX(segment)
+                    y: modelData.lane * root.laneHeight + Kirigami.Units.smallSpacing
+                    width: root.segmentWidth(segment)
                     height: root.laneHeight - Kirigami.Units.smallSpacing * 2
                     radius: Kirigami.Units.smallSpacing
-                    color: modelData.categoryColor || Kirigami.Theme.highlightColor
-                    border.width: activeFocus ? 2 : (modelData.manuallyEdited ? 1 : 0)
+                    color: segment.categoryColor || Kirigami.Theme.highlightColor
+                    border.width: activeFocus ? 2 : (segment.manuallyEdited ? 1 : 0)
                     border.color: Kirigami.Theme.textColor
-                    opacity: modelData.active ? 0.75 : 1
-                    objectName: "timeline-session-" + modelData.sessionId
-                    activeFocusOnTab: root.editable && !modelData.active
-                    Accessible.role: modelData.active ? Accessible.StaticText : Accessible.Button
-                    Accessible.name: root.sessionName(modelData)
-                    Accessible.description: modelData.manuallyEdited ? i18n("Manually edited work session") : ""
+                    opacity: segment.active ? 0.75 : 1
+                    objectName: "timeline-session-" + segment.sessionId
+                    activeFocusOnTab: root.editable && !segment.active && !root.creationEnabled
+                    Accessible.role: segment.active ? Accessible.StaticText : Accessible.Button
+                    Accessible.name: root.sessionName(segment)
+                    Accessible.description: segment.manuallyEdited ? i18n("Manually edited work session") : ""
                     Accessible.onPressAction: {
-                        if (!modelData.active) root.sessionSelected(modelData, sessionBlock)
+                        if (!segment.active && !root.creationEnabled) root.sessionSelected(segment, sessionBlock)
                     }
 
                     Controls.ToolTip.visible: mouseArea.containsMouse
-                    Controls.ToolTip.text: root.sessionName(modelData)
+                    Controls.ToolTip.text: root.sessionName(segment)
 
                     Controls.Label {
+                        id: sessionLabel
+                        objectName: "timeline-session-label-" + segment.sessionId
                         anchors.fill: parent
                         anchors.margins: Kirigami.Units.smallSpacing
-                        text: parent.width > Kirigami.Units.gridUnit * 5 ? modelData.taskTitle : ""
+                        text: segment.taskTitle
                         elide: Text.ElideRight
                         color: Kirigami.Theme.highlightedTextColor
                     }
 
-                    Keys.onSpacePressed: root.sessionSelected(modelData, sessionBlock)
-                    Keys.onReturnPressed: root.sessionSelected(modelData, sessionBlock)
+                    Keys.onSpacePressed: {
+                        if (!root.creationEnabled) root.sessionSelected(segment, sessionBlock)
+                    }
+                    Keys.onReturnPressed: {
+                        if (!root.creationEnabled) root.sessionSelected(segment, sessionBlock)
+                    }
 
                     MouseArea {
                         id: mouseArea
                         anchors.fill: parent
                         hoverEnabled: true
-                        enabled: root.editable && !modelData.active
+                        enabled: root.editable && !segment.active && !root.creationEnabled
                         property real pressX: 0
                         property string mode: "move"
                         onPressed: {
@@ -270,11 +427,11 @@ Item {
                         onReleased: {
                             const delta = Math.round((mouse.x - pressX) / root.slotWidth) * 15 * 60 * 1000
                             if (delta === 0) {
-                                root.sessionSelected(modelData, sessionBlock)
+                                root.sessionSelected(segment, sessionBlock)
                                 return
                             }
-                            let start = Date.parse(modelData.sessionStartUtc)
-                            let end = Date.parse(modelData.sessionEndUtc)
+                            let start = Date.parse(segment.sessionStartUtc)
+                            let end = Date.parse(segment.sessionEndUtc)
                             if (mode === "start") {
                                 start += delta
                             } else if (mode === "end") {
@@ -284,7 +441,7 @@ Item {
                                 end += delta
                             }
                             if (end > start) {
-                                root.sessionEditRequested(modelData, new Date(start).toISOString(),
+                                root.sessionEditRequested(segment, new Date(start).toISOString(),
                                     new Date(end).toISOString(), sessionBlock)
                             }
                         }

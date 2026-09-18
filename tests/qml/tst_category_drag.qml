@@ -370,6 +370,80 @@ TestCase {
         board.closeReports()
     }
 
+    function test_dailyTimelineStacksConcurrentTimersAndSupportsZoom() {
+        const tasks = Database.listTasks({ statuses: ["ready"] })
+        const now = Date.now()
+        const timelineTitle = "Polish daily timeline"
+        Database.updateTask({ id: tasks[0].taskId, title: timelineTitle })
+        testConfiguration.allowConcurrentTimers = true
+        const first = Database.startTimer(tasks[0].taskId, "Etc/UTC",
+            new Date(now - 90 * 60 * 1000).toISOString(), true)
+        const second = Database.startTimer(tasks[1].taskId, "Etc/UTC",
+            new Date(now - 60 * 60 * 1000).toISOString(), true)
+        board.reload()
+        board.openDailyTimeline(tasks[0].categoryId)
+
+        const reportsPage = findChild(board, "reports-page")
+        const timeline = findChild(reportsPage, "daily-report-timeline")
+        const firstBlock = findChild(timeline, "timeline-session-" + first.id)
+        const secondBlock = findChild(timeline, "timeline-session-" + second.id)
+        const firstLabel = findChild(timeline, "timeline-session-label-" + first.id)
+        const zoomIn = findChild(timeline, "daily-timeline-zoom-in")
+        const zoomReset = findChild(timeline, "daily-timeline-zoom-reset")
+        verify(timeline !== null)
+        verify(firstBlock !== null)
+        verify(secondBlock !== null)
+        verify(firstLabel !== null)
+        verify(zoomIn !== null)
+        verify(zoomReset !== null)
+        compare(timeline.laneCount, 2)
+        verify(firstBlock.y !== secondBlock.y)
+        verify(firstBlock.x < secondBlock.x + secondBlock.width
+            && secondBlock.x < firstBlock.x + firstBlock.width)
+        compare(firstLabel.text, timelineTitle)
+        verify(firstLabel.width >= firstLabel.implicitWidth)
+
+        const initialSlotWidth = timeline.slotWidth
+        zoomIn.click()
+        tryVerify(function() { return timeline.slotWidth > initialSlotWidth }, 1000)
+        verify(zoomReset.enabled)
+        zoomReset.click()
+        tryCompare(timeline, "zoomIndex", timeline.defaultZoomIndex, 1000)
+        compare(timeline.slotWidth, initialSlotWidth)
+        board.closeReports()
+    }
+
+    function test_dailyTimelineDrawModeCreatesInsteadOfPanning() {
+        const category = Database.listCategories()[0]
+        board.openDailyTimeline(category.id)
+
+        const reportsPage = findChild(board, "reports-page")
+        const timeline = findChild(reportsPage, "daily-report-timeline")
+        const drawButton = findChild(reportsPage, "report-draw-session")
+        const createArea = findChild(timeline, "daily-timeline-create-area")
+        const flickable = findChild(timeline, "daily-timeline-flickable")
+        verify(timeline !== null)
+        verify(drawButton !== null)
+        verify(createArea !== null)
+        verify(flickable !== null)
+
+        flickable.contentX = timeline.slotWidth * 8
+        const contentX = flickable.contentX
+        drawButton.click()
+        compare(timeline.creationEnabled, true)
+        compare(flickable.interactive, false)
+        timeline.beginDrawing(timeline.slotWidth * 10)
+        compare(createArea.dragging, true)
+        timeline.updateDrawing(timeline.slotWidth * 14)
+        timeline.completeDrawing(timeline.slotWidth * 14)
+
+        tryCompare(reportsPage, "draftOpen", true, 1000)
+        compare(flickable.contentX, contentX)
+        verify(reportsPage.draftSegment === null)
+        reportsPage.cancelDraft(false)
+        board.closeReports()
+    }
+
     function test_dailyEditorPreservesOverlappingDraft() {
         const category = Database.listCategories()[0]
         board.openDailyTimeline(category.id)
