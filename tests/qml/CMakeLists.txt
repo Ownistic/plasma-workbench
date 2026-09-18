@@ -30,6 +30,7 @@ add_test(
     COMMAND ${QMLLINT} -I ${CMAKE_BINARY_DIR}/qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/main.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/TodoBoard.qml
+        ${CMAKE_SOURCE_DIR}/package/contents/ui/CategoryDragGroup.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/CategoryHeader.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/TaskCard.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/TaskDetails.qml

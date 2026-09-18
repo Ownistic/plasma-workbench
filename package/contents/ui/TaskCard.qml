@@ -10,6 +10,8 @@ Kirigami.AbstractCard {
     required property var task
     required property bool active
     required property string elapsedText
+    property bool interactive: true
+    property string objectNamePrefix: ""
     signal openRequested()
     signal timerRequested()
     signal statusRequested(string status)
@@ -27,13 +29,21 @@ Kirigami.AbstractCard {
     readonly property bool dragging: dragHandler.active
 
     implicitHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
-    activeFocusOnTab: true
+    objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-task-" + root.task.taskId
+        : "task-card-" + root.task.taskId
+    activeFocusOnTab: root.interactive
     Accessible.role: Accessible.Button
     Accessible.name: i18n("Open task %1", root.task.title)
 
-    Keys.onReturnPressed: root.openRequested()
-    Keys.onEnterPressed: root.openRequested()
-    Keys.onSpacePressed: root.openRequested()
+    Keys.onReturnPressed: {
+        if (root.interactive) root.openRequested()
+    }
+    Keys.onEnterPressed: {
+        if (root.interactive) root.openRequested()
+    }
+    Keys.onSpacePressed: {
+        if (root.interactive) root.openRequested()
+    }
 
     contentItem: RowLayout {
         id: content
@@ -52,6 +62,7 @@ Kirigami.AbstractCard {
 
             TapHandler {
                 acceptedButtons: Qt.LeftButton
+                enabled: root.interactive
                 onTapped: root.openRequested()
             }
 
@@ -84,7 +95,9 @@ Kirigami.AbstractCard {
         PlasmaComponents.ToolButton {
             icon.name: root.active ? "media-playback-pause" : "media-playback-start"
             Accessible.name: root.active ? i18n("Pause timer for %1", root.task.title) : i18n("Start timer for %1", root.task.title)
-            onClicked: root.timerRequested()
+            onClicked: {
+                if (root.interactive) root.timerRequested()
+            }
         }
 
         PlasmaComponents.ToolButton {
@@ -97,11 +110,13 @@ Kirigami.AbstractCard {
             id: taskActionsButton
             icon.name: "overflow-menu"
             Accessible.name: i18n("Task actions for %1", root.task.title)
-            onClicked: taskActionsMenu.popup(taskActionsButton, 0, taskActionsButton.height)
+            onClicked: {
+                if (root.interactive) taskActionsMenu.popup(taskActionsButton, 0, taskActionsButton.height)
+            }
         }
     }
 
-    Drag.active: dragHandler.active
+    Drag.active: root.interactive && dragHandler.active
     Drag.hotSpot.x: width / 2
     Drag.hotSpot.y: height / 2
     Drag.keys: ["application/x-workbench-task"]
@@ -110,6 +125,7 @@ Kirigami.AbstractCard {
     DragHandler {
         id: dragHandler
         parent: dragHandle
+        enabled: root.interactive
         target: root
         onActiveChanged: {
             if (active) {
@@ -129,6 +145,7 @@ Kirigami.AbstractCard {
 
     DropArea {
         anchors.fill: parent
+        enabled: root.interactive
         keys: ["application/x-workbench-task"]
         function placementFor(drag) {
             return drag.y >= height / 2 ? "after" : "before"

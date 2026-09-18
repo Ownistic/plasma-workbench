@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import org.kde.kirigami as Kirigami
 
 import "../../package/contents/ui" as WorkbenchUi
 import "../../package/contents/ui/time" as WorkbenchTime
@@ -102,38 +103,81 @@ TestCase {
         }
     }
 
-    function test_categoryDragShowsMovingFullGroupGhost() {
+    function test_categoryDragShowsFullFidelityGroupGhost() {
         const categories = Database.listCategories()
         const firstCategory = categories[0]
         const secondCategory = categories[1]
         const handle = findChild(board, "category-drag-handle-" + firstCategory.id)
+        const sourceHeader = findChild(board, "category-header-" + firstCategory.id)
+        const sourceTime = findChild(board, "category-time-" + firstCategory.id)
         const sourceSlot = findChild(board, "category-slot-" + firstCategory.id)
         const destinationSlot = findChild(board, "category-slot-" + secondCategory.id)
         const destinationDrop = findChild(board, "category-drop-target-" + secondCategory.id)
         const destinationAfterPlaceholder = findChild(board, "category-placeholder-after-" + secondCategory.id)
         const overlay = findChild(board, "drag-overlay")
+        const categoryGhost = findChild(board, "category-drag-preview-ghost")
+        const categoryGhostFrame = findChild(board, "category-drag-preview-frame")
+        const categoryPreview = findChild(board, "category-drag-preview")
+        const previewHeader = findChild(board, "category-drag-preview-category-header")
+        const previewTime = findChild(board, "category-drag-preview-category-time")
+        const previewTimeline = findChild(board, "category-drag-preview-category-timeline")
+        const previewCollapse = findChild(board, "category-drag-preview-category-collapse")
+        const previewHandle = findChild(board, "category-drag-preview-category-drag-handle")
+        const previewActions = findChild(board, "category-drag-preview-category-actions")
         verify(handle !== null)
+        verify(sourceHeader !== null)
+        verify(sourceTime !== null)
         verify(sourceSlot !== null)
         verify(destinationSlot !== null)
         verify(destinationDrop !== null)
         verify(destinationAfterPlaceholder !== null)
         verify(overlay !== null)
+        verify(categoryGhost !== null)
+        verify(categoryGhostFrame !== null)
+        verify(categoryPreview !== null)
+        verify(previewHeader !== null)
+        verify(previewTime !== null)
+        verify(previewTimeline !== null)
+        verify(previewCollapse !== null)
+        verify(previewHandle !== null)
+        verify(previewActions !== null)
 
-        board.beginCategoryDrag(firstCategory, handle, sourceSlot)
+        board.beginCategoryDrag(firstCategory, sourceHeader, sourceSlot)
         compare(board.draggedCategoryId, firstCategory.id)
         verify(board.draggedCategoryId.length > 0)
-        compare(board.draggedCategoryTaskCount, 4)
-        compare(board.draggedCategoryTaskPreview.length, board.categoryDragPreviewTaskLimit,
-            "Category drags must not create a visual delegate for every task")
+        compare(board.draggedCategoryTasks.length, 4)
+        tryCompare(sourceSlot, "height", 0)
+        verify(board.draggedCategoryGroupHeight > 0)
         verify(!overlay.draggingTask)
         verify(overlay.sourceItem !== null)
         tryVerify(function() { return overlay.active }, 1000)
-        verify(overlay.height > handle.height, "Category ghost must contain the full category group")
+        verify(findChild(board, "category-drag-source-" + firstCategory.id) === null)
+        board.previewCategoryMove(firstCategory.id, sourceSlot.model.id, "after", sourceSlot)
+        compare(board.draggedCategoryPreviewItem, null,
+            "A dragged category must never become its own insertion target")
+        compare(categoryGhost.opacity, 0.85)
+        compare(categoryGhostFrame.border.width, 1)
+        compare(categoryGhostFrame.radius, Kirigami.Units.smallSpacing)
+        tryVerify(function() { return categoryPreview.implicitHeight > sourceHeader.height }, 1000)
+        compare(overlay.height, categoryPreview.implicitHeight,
+            "Category ghost must match the full source group")
+        compare(previewHeader.interactive, false)
+        compare(previewTime.text, sourceTime.text)
+        compare(previewTimeline.icon.name, "view-calendar-day")
+        compare(previewCollapse.icon.name, "go-up")
+        compare(previewHandle.icon.name, "drag-handle-symbolic")
+        compare(previewActions.icon.name, "overflow-menu")
+        for (let index = 0; index < board.draggedCategoryTasks.length; index += 1) {
+            const task = board.draggedCategoryTasks[index]
+            const previewTask = findChild(board, "category-drag-preview-task-" + task.taskId)
+            verify(previewTask !== null)
+            compare(previewTask.interactive, false)
+        }
         verify(destinationDrop.height >= destinationSlot.height, "A category target must cover its full task group")
         const initialY = overlay.y
 
-        handle.y += 80
-        board.updateCategoryDragPosition(handle)
+        sourceHeader.y += 80
+        board.updateCategoryDragPosition(sourceHeader)
         tryVerify(function() { return Math.abs(overlay.y - initialY) > 20 }, 1000)
 
         const lowerHalfY = destinationDrop.height * 0.75
@@ -143,12 +187,27 @@ TestCase {
         compare(board.draggedCategoryPreviewItem, destinationSlot)
         compare(board.draggedCategoryPlacement, "after")
         tryVerify(function() { return destinationAfterPlaceholder.height > 0 }, 1000)
+        compare(destinationAfterPlaceholder.height, board.draggedCategoryGroupHeight,
+            "The destination ghost must reserve exactly one category group")
+        const placeholderGhost = findChild(board,
+            "category-drag-placeholder-after-" + secondCategory.id)
+        const placeholderHeader = findChild(board,
+            "category-drag-placeholder-after-" + secondCategory.id + "-category-header")
+        verify(placeholderGhost !== null)
+        verify(placeholderHeader !== null)
+        compare(placeholderGhost.opacity, 0.55)
+        for (let index = 0; index < board.draggedCategoryTasks.length; index += 1) {
+            const task = board.draggedCategoryTasks[index]
+            verify(findChild(board, "category-drag-placeholder-after-" + secondCategory.id
+                + "-task-" + task.taskId) !== null)
+        }
         compare(board.categoryGroupPlacement(lowerHalfY, destinationDrop.height, secondCategory.id), "after",
             "Placeholder expansion must not move the drop midpoint")
 
         board.commitCategoryDrop(firstCategory.id, secondCategory.id, board.draggedCategoryPlacement)
         board.finishCategoryDrag()
         tryVerify(function() { return !overlay.active }, 1000)
+        compare(sourceSlot.height, sourceSlot.implicitHeight)
         const reorderedCategories = Database.listCategories()
         compare(reorderedCategories[0].id, secondCategory.id)
         compare(reorderedCategories[1].id, firstCategory.id)

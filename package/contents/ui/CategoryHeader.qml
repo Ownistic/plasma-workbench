@@ -14,6 +14,8 @@ PlasmaExtras.ListSectionHeader {
     required property bool collapsed
     required property string timeText
     required property bool showingTotalTime
+    property bool interactive: true
+    property string objectNamePrefix: ""
     signal editRequested()
     signal deleteRequested()
     signal collapseRequested()
@@ -32,7 +34,8 @@ PlasmaExtras.ListSectionHeader {
     property real dragOriginY: 0
 
     text: root.categoryName
-    objectName: "category-header-" + root.categoryId
+    objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-header"
+        : "category-header-" + root.categoryId
 
     contentItem: RowLayout {
         spacing: Kirigami.Units.smallSpacing
@@ -54,7 +57,8 @@ PlasmaExtras.ListSectionHeader {
 
         Controls.ToolButton {
             id: categoryTimeButton
-            objectName: "category-time-" + root.categoryId
+            objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-time"
+                : "category-time-" + root.categoryId
             text: root.timeText
             Accessible.name: root.showingTotalTime
                 ? i18n("Total tracked time for %1: %2. Click to show today's time.", root.categoryName, root.timeText)
@@ -62,35 +66,49 @@ PlasmaExtras.ListSectionHeader {
             Controls.ToolTip.visible: hovered
             Controls.ToolTip.text: root.showingTotalTime
                 ? i18n("Show today's tracked time") : i18n("Show total tracked time")
-            onClicked: root.timeDisplayToggleRequested()
+            onClicked: {
+                if (root.interactive) root.timeDisplayToggleRequested()
+            }
         }
 
         PlasmaComponents.ToolButton {
-            objectName: "category-timeline-" + root.categoryId
+            objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-timeline"
+                : "category-timeline-" + root.categoryId
             icon.name: "view-calendar-day"
             Accessible.name: i18n("Open daily timeline for %1", root.categoryName)
-            onClicked: root.dailyTimelineRequested()
+            onClicked: {
+                if (root.interactive) root.dailyTimelineRequested()
+            }
         }
 
         PlasmaComponents.ToolButton {
+            objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-collapse"
+                : "category-collapse-" + root.categoryId
             icon.name: root.collapsed ? "go-down" : "go-up"
             Accessible.name: root.collapsed ? i18n("Expand category %1", root.categoryName)
                 : i18n("Collapse category %1", root.categoryName)
-            onClicked: root.collapseRequested()
+            onClicked: {
+                if (root.interactive) root.collapseRequested()
+            }
         }
 
         PlasmaComponents.ToolButton {
             id: categoryDragHandle
-            objectName: "category-drag-handle-" + root.categoryId
+            objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-drag-handle"
+                : "category-drag-handle-" + root.categoryId
             icon.name: "drag-handle-symbolic"
             Accessible.name: i18n("Drag category %1 to reorder it", root.categoryName)
         }
 
         PlasmaComponents.ToolButton {
             id: categoryActionsButton
+            objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-actions"
+                : "category-actions-" + root.categoryId
             icon.name: "overflow-menu"
             Accessible.name: i18n("Category actions for %1", root.categoryName)
-            onClicked: categoryActionsMenu.popup()
+            onClicked: {
+                if (root.interactive) categoryActionsMenu.popup()
+            }
         }
     }
 
@@ -112,7 +130,7 @@ PlasmaExtras.ListSectionHeader {
         }
     }
 
-    Drag.active: categoryDragHandler.active
+    Drag.active: root.interactive && categoryDragHandler.active
     Drag.hotSpot.x: width / 2
     Drag.hotSpot.y: height / 2
     Drag.keys: ["application/x-workbench-category"]
@@ -121,6 +139,7 @@ PlasmaExtras.ListSectionHeader {
     DragHandler {
         id: categoryDragHandler
         parent: categoryDragHandle
+        enabled: root.interactive
         target: root
         onActiveChanged: {
             if (active) {
@@ -141,6 +160,7 @@ PlasmaExtras.ListSectionHeader {
 
     DropArea {
         anchors.fill: parent
+        enabled: root.interactive
         keys: ["application/x-workbench-task", "application/x-workbench-category"]
         function placementFor(drag) {
             return drag.y >= height / 2 ? "after" : "before"
