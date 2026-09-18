@@ -16,6 +16,7 @@ Item {
     required property var plasmoidRoot
     property var selectedStatuses: []
     property alias categories: categoryModel
+    property alias categoryDeleteConfirmation: categoryDeleteDialog
     property string currentPage: "board"
     property string moveError: ""
     property string draggedTaskId: ""
@@ -230,9 +231,7 @@ Item {
         visibleCategoryModel.clear()
         for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex += 1) {
             categoryModel.append(categories[categoryIndex])
-            if (tasks.some(function(task) { return task.categoryId === categories[categoryIndex].id })) {
-                visibleCategoryModel.append(categories[categoryIndex])
-            }
+            visibleCategoryModel.append(categories[categoryIndex])
         }
         for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
             taskModel.append(tasks[taskIndex])
@@ -1432,6 +1431,7 @@ Item {
 
     Controls.Dialog {
         id: categoryDeleteDialog
+        objectName: "category-delete-dialog"
         parent: root
         property string categoryId: ""
         property string targetCategoryName: ""

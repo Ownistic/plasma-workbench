@@ -16,6 +16,8 @@ PlasmaExtras.ListSectionHeader {
     required property bool showingTotalTime
     property bool interactive: true
     property string objectNamePrefix: ""
+    property alias actionsMenu: categoryActionsMenu
+    property alias deleteAction: categoryDeleteAction
     signal editRequested()
     signal deleteRequested()
     signal collapseRequested()
@@ -107,13 +109,15 @@ PlasmaExtras.ListSectionHeader {
             icon.name: "overflow-menu"
             Accessible.name: i18n("Category actions for %1", root.categoryName)
             onClicked: {
-                if (root.interactive) categoryActionsMenu.popup()
+                if (root.interactive) categoryActionsMenu.popup(categoryActionsButton, 0, categoryActionsButton.height)
             }
         }
     }
 
     Controls.Menu {
         id: categoryActionsMenu
+        objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-category-actions-menu"
+            : "category-actions-menu-" + root.categoryId
 
         Controls.MenuItem {
             text: i18n("Edit category...")
@@ -124,6 +128,9 @@ PlasmaExtras.ListSectionHeader {
         Controls.MenuSeparator {}
 
         Controls.MenuItem {
+            id: categoryDeleteAction
+            objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-category-delete-action"
+                : "category-delete-action-" + root.categoryId
             text: i18n("Delete category...")
             Accessible.name: i18n("Delete category %1", root.categoryName)
             onTriggered: root.deleteRequested()

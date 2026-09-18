@@ -103,6 +103,28 @@ TestCase {
         }
     }
 
+    function test_emptyCategoryActionsMenuDeletesToTrash() {
+        const emptyCategory = Database.createCategory({ name: "Empty", color: "#f67400" })
+        board.reload()
+
+        const header = findChild(board, "category-header-" + emptyCategory.id)
+        const actionsButton = findChild(board, "category-actions-" + emptyCategory.id)
+        verify(header !== null, "Empty categories must remain visible on the board")
+        verify(actionsButton !== null)
+
+        actionsButton.click()
+        verify(header.actionsMenu !== null)
+        header.deleteAction.click()
+        const deleteDialog = board.categoryDeleteConfirmation
+        compare(deleteDialog.categoryId, emptyCategory.id)
+
+        deleteDialog.accept()
+        verify(Database.listCategories().every(function(category) {
+            return category.id !== emptyCategory.id
+        }))
+        compare(Database.listTrashedCategories()[0].id, emptyCategory.id)
+    }
+
     function test_categoryDragShowsFullFidelityGroupGhost() {
         const categories = Database.listCategories()
         const firstCategory = categories[0]

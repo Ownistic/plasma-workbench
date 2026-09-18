@@ -88,6 +88,9 @@ endif()
 if(NOT task_card MATCHES "taskActionsMenu\\.popup\\(taskActionsButton, 0, taskActionsButton\\.height\\)")
     message(FATAL_ERROR "Task action menu must be anchored to its button")
 endif()
+if(NOT category_header MATCHES "categoryActionsMenu\\.popup\\(categoryActionsButton, 0, categoryActionsButton\\.height\\)")
+    message(FATAL_ERROR "Category action menu must be anchored to its button")
+endif()
 
 # Reorder handles must use an icon available in Breeze. A floating source plus
 # live model preview must support before/after and terminal insertion points.
