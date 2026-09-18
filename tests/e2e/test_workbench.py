@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shlex
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 
 from appium import webdriver
@@ -21,7 +22,7 @@ from selenium.webdriver.support import expected_conditions as conditions
 from selenium.webdriver.support.ui import WebDriverWait
 
 APPIUM_SERVER_URL = "http://127.0.0.1:4723"
-CATEGORY_NAME = "Appium category"
+CATEGORY_NAME = "Launch preparation"
 MAX_RSS_KIB = 768 * 1024
 MAX_RSS_GROWTH_KIB = 96 * 1024
 NAVIGATION_ITERATIONS = 10
@@ -136,14 +137,14 @@ class WorkbenchEndToEndTest(unittest.TestCase):
             )
         ).click()
 
-    def create_task(self) -> None:
+    def create_task(self, title: str = "Polish daily timeline") -> None:
         self.element("Create task").click()
         title_field = self.wait.until(
             conditions.presence_of_element_located(
                 (AppiumBy.ACCESSIBILITY_ID, "create-task-title")
             )
         )
-        title_field.send_keys("Appium task")
+        title_field.send_keys(title)
         self.wait.until(
             conditions.element_to_be_clickable(
                 (AppiumBy.ACCESSIBILITY_ID, "create-task-save")
@@ -168,6 +169,9 @@ class WorkbenchEndToEndTest(unittest.TestCase):
     def test_report_navigation_remains_bounded(self) -> None:
         self.create_category()
         self.create_task()
+        self.create_task("Plan the release")
+        self.create_task("Review activity report")
+        self.capture_screenshot("board")
         rss_samples: list[int] = []
 
         reports_page = self.open_daily_report()
@@ -188,36 +192,51 @@ class WorkbenchEndToEndTest(unittest.TestCase):
             )
         )
 
-        add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
-        add_button.click()
-        editor = self.wait.until(
-            conditions.presence_of_element_located(
-                (AppiumBy.ACCESSIBILITY_ID, "daily-session-editor")
+        anchor_hour = max(3, min(20, datetime.now(UTC).astimezone().hour))
+        session_times = [
+            (f"{anchor_hour - 3:02d}:00:00", f"{anchor_hour - 2:02d}:30:00"),
+            (f"{anchor_hour - 1:02d}:00:00", f"{anchor_hour:02d}:00:00"),
+            (f"{anchor_hour + 1:02d}:00:00", f"{anchor_hour + 2:02d}:30:00"),
+        ]
+
+        for index, (start_time, end_time) in enumerate(session_times):
+            add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
+            add_button.click()
+            editor = self.wait.until(
+                conditions.presence_of_element_located(
+                    (AppiumBy.ACCESSIBILITY_ID, "daily-session-editor")
+                )
             )
-        )
-        start_field = editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-start")
-        editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-end")
-        for field_id in ("daily-session-start-date", "daily-session-start",
-                         "daily-session-end-date", "daily-session-end"):
-            self.assert_contained(
-                editor,
-                editor.find_element(AppiumBy.ACCESSIBILITY_ID, field_id),
+            start_field = editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-start")
+            end_field = editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-end")
+            for field_id in ("daily-session-start-date", "daily-session-start",
+                             "daily-session-end-date", "daily-session-end"):
+                self.assert_contained(
+                    editor,
+                    editor.find_element(AppiumBy.ACCESSIBILITY_ID, field_id),
+                )
+            self.wait.until(lambda _driver, field=start_field: field.is_selected())
+            start_field.clear()
+            start_field.send_keys(start_time)
+            end_field.clear()
+            end_field.send_keys(end_time)
+            if index == len(session_times) - 1:
+                self.capture_screenshot("editing")
+            editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-save").click()
+            self.wait.until(
+                lambda driver, expected=index + 1: len(driver.find_elements(
+                    AppiumBy.XPATH,
+                    "//*[contains(@accessibility-id, 'timeline-session-')]",
+                )) >= expected
             )
-        self.wait.until(lambda _driver: start_field.is_selected())
-        self.capture_screenshot("editing")
-        editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-save").click()
-        self.wait.until(
-            conditions.presence_of_element_located(
-                (AppiumBy.XPATH, "//*[contains(@accessibility-id, 'timeline-session-')]")
-            )
-        )
+            add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
+            self.wait.until(lambda _driver, button=add_button: button.is_selected())
+
         self.wait.until(
             conditions.presence_of_element_located(
                 (AppiumBy.XPATH, "//*[starts-with(@name, 'Total:') and not(contains(@name, '00:00:00'))]")
             )
         )
-        add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
-        self.wait.until(lambda _driver: add_button.is_selected())
         self.capture_screenshot("populated")
 
         self.close_report(reports_page)

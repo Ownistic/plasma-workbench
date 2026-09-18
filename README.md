@@ -4,6 +4,16 @@ A card-based task manager and work-time tracker for KDE Plasma.
 
 Workbench keeps tasks, status, categories, tracked time, and work reports directly on the Plasma desktop.
 
+## Screenshots
+
+| Task board | Daily timeline |
+| --- | --- |
+| ![Workbench task board with three launch-preparation tasks](docs/screenshots/workbench-board.png) | ![Workbench daily report with three tracked-time sessions](docs/screenshots/workbench-daily-report.png) |
+
+### Exact session editing
+
+![Workbench exact-time session editor below the daily timeline](docs/screenshots/workbench-session-editor.png)
+
 ## Build and Test
 
 The data repository is QML JavaScript using `QtQuick.LocalStorage`. A small Qt 6 QML module supplies IANA timezone and daylight-saving-safe report calculations.
@@ -37,6 +47,12 @@ cmake --build build --target e2e
 The E2E environment uses an isolated XDG home, D-Bus session, and nested KWin
 compositor. See [`tests/e2e/README.md`](tests/e2e/README.md) for dependencies,
 artifacts, and test-authoring conventions.
+
+Regenerate the README screenshots from the compact Appium fixture with:
+
+```sh
+./scripts/update-readme-screenshots.sh
+```
 
 Build the self-contained plasmoid, then create a release archive and install it with `kpackagetool6`:
 
