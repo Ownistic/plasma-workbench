@@ -9,14 +9,8 @@ Workbench keeps tasks, status, categories, tracked time, and work reports direct
 | Task board | Daily timeline |
 | --- | --- |
 | ![Workbench task board with three launch-preparation tasks](docs/screenshots/workbench-board.png) | ![Workbench daily report with three tracked-time sessions](docs/screenshots/workbench-daily-report.png) |
-
-### Exact session editing
-
-![Workbench exact-time session editor below the daily timeline](docs/screenshots/workbench-session-editor.png)
-
-### Rolling year heatmap
-
-![Workbench rolling 365-day heatmap with three months of tracked work](docs/screenshots/workbench-year-heatmap.png)
+| Exact session editing | Rolling year heatmap |
+| ![Workbench exact-time session editor below the daily timeline](docs/screenshots/workbench-session-editor.png) | ![Workbench rolling 365-day heatmap with three months of tracked work](docs/screenshots/workbench-year-heatmap.png) |
 
 ## Build and Test
 
