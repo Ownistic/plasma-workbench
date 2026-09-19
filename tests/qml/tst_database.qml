@@ -648,6 +648,8 @@ TestCase {
         })
         const yearly = Reports.yearlyReport(WorkbenchTime.TimeMath, {
             year: 2024,
+            month: 3,
+            day: 13,
             firstDayOfWeek: 1,
             timezoneId: "America/New_York"
         })
@@ -658,6 +660,6 @@ TestCase {
         compare(monthly.byDate.length, 29)
         compare(monthly.byWeek.length, 5)
         compare(yearly.totalSeconds, 0)
-        compare(yearly.byDate.length, 366)
+        compare(yearly.byDate.length, 365)
     }
 }

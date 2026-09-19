@@ -321,10 +321,31 @@ TestCase {
         }
 
         board.openReports(false)
+        const task = Database.listTasks({ statuses: ["ready"] })[0]
+        const trackedDate = reportsPage.year + "-" + String(reportsPage.month).padStart(2, "0")
+            + "-" + String(reportsPage.day).padStart(2, "0")
+        Database.createWorkSession({
+            taskId: task.taskId,
+            startedAtUtc: trackedDate + "T09:00:00.000Z",
+            endedAtUtc: trackedDate + "T10:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+        board.reload()
         reportsPage.selectPeriod(3, true)
         tryVerify(function() { return yearLoader.item !== null }, 5000)
         compare(dayLoader.item, null)
-        verify(yearLoader.item.days.length === 365 || yearLoader.item.days.length === 366)
+        compare(yearLoader.item.days.length, 365)
+        compare(yearLoader.item.days[yearLoader.item.days.length - 1].date, trackedDate)
+        compare(yearLoader.item.maximumSeconds, 3600)
+        const trackedDay = findChild(yearLoader.item, "year-day-" + trackedDate)
+        const emptyDay = findChild(yearLoader.item, "year-day-" + yearLoader.item.days[0].date)
+        verify(trackedDay !== null)
+        verify(emptyDay !== null)
+        compare(trackedDay.color, yearLoader.item.colorFor(3600))
+        verify(trackedDay.color !== emptyDay.color,
+            "Tracked color " + trackedDay.color + " must differ from empty color " + emptyDay.color)
+        verify(trackedDay.x + trackedDay.width <= yearLoader.item.width,
+            "The selected final day must fit within the heatmap")
         board.closeReports()
         tryCompare(yearLoader, "item", null, 5000)
     }

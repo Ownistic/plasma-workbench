@@ -264,6 +264,29 @@ QVariantMap TimeMath::yearRange(int year, const QString &timeZoneId) const
     return rangeResult(start, end, timeZone);
 }
 
+QVariantMap TimeMath::trailingYearRange(int year, int month, int day,
+                                        const QString &timeZoneId) const
+{
+    const QDate endDate(year, month, day);
+    if (!endDate.isValid()) {
+        return invalidResult(QStringLiteral("The local date is invalid."));
+    }
+
+    QTimeZone timeZone;
+    if (!timeZoneForId(timeZoneId, &timeZone)) {
+        return invalidResult(QStringLiteral("The time zone ID is invalid."));
+    }
+
+    const QDate startDate = endDate.addDays(-364);
+    const QDate exclusiveEndDate = endDate.addDays(1);
+    const QDateTime start = localMidnight(startDate, timeZone);
+    const QDateTime end = localMidnight(exclusiveEndDate, timeZone);
+    if (!startDate.isValid() || !exclusiveEndDate.isValid() || !start.isValid() || !end.isValid() || start >= end) {
+        return invalidResult(QStringLiteral("The trailing local year does not map to a valid UTC range."));
+    }
+    return rangeResult(start, end, timeZone);
+}
+
 QVariantList TimeMath::splitInterval(const QString &startUtc, const QString &endUtc,
                                      const QString &reportStartUtc, const QString &reportEndUtc,
                                      const QString &timeZoneId) const

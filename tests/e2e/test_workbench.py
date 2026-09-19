@@ -250,7 +250,7 @@ class WorkbenchEndToEndTest(unittest.TestCase):
         ).send_keys(Keys.SPACE)
         self.wait.until(
             conditions.presence_of_element_located(
-                (AppiumBy.XPATH, "//*[contains(@name, 'Daily tracked-time heatmap for')]")
+                (AppiumBy.XPATH, "//*[contains(@name, 'Daily tracked-time heatmap ending')]")
             )
         )
         reports_page.find_element(
@@ -308,6 +308,29 @@ class WorkbenchEndToEndTest(unittest.TestCase):
             )
         )
         self.capture_screenshot("populated")
+
+        today = datetime.now(UTC).astimezone().date()
+        reports_page.find_element(
+            AppiumBy.ACCESSIBILITY_ID, "reports-year-tab"
+        ).send_keys(Keys.SPACE)
+        tracked_day = self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.XPATH,
+                 f"//*[starts-with(@name, 'Tracked time on {today.isoformat()}:') "
+                 "and not(contains(@name, '00:00:00'))]"),
+            )
+        )
+        heatmap_days = self.driver.find_elements(
+            AppiumBy.XPATH, "//*[starts-with(@name, 'Tracked time on ')]"
+        )
+        rightmost_day_x = max(day.rect["x"] for day in heatmap_days if day.rect["width"] > 0)
+        self.assertAlmostEqual(
+            tracked_day.rect["x"],
+            rightmost_day_x,
+            delta=1,
+            msg="The selected day must be in the final heatmap column",
+        )
+        self.capture_screenshot("year-populated")
 
         self.close_report(reports_page)
         baseline_rss = plasmawindowed_rss_kib(self.package_dir)

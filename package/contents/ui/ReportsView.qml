@@ -42,6 +42,15 @@ FocusScope {
 
     function calendarDate() { return new Date(Date.UTC(year, month - 1, day)) }
 
+    function inclusiveReportEndDate() {
+        if (!report || !/^\d{4}-\d{2}-\d{2}$/.test(report.endDateExclusive)) {
+            return ""
+        }
+        const date = new Date(report.endDateExclusive + "T00:00:00.000Z")
+        date.setUTCDate(date.getUTCDate() - 1)
+        return date.toISOString().slice(0, 10)
+    }
+
     function periodLabel() {
         if (period === "day") {
             const date = new Date(year, month - 1, day)
@@ -52,7 +61,11 @@ FocusScope {
             }
             return Qt.formatDate(date, "dddd, MMMM d, yyyy")
         }
-        return report ? report.startDate + " - " + report.endDateExclusive : ""
+        if (!report) {
+            return ""
+        }
+        return period === "year" ? report.startDate + " - " + inclusiveReportEndDate()
+            : report.startDate + " - " + report.endDateExclusive
     }
 
     function categoryName() {
@@ -544,7 +557,7 @@ FocusScope {
                 YearHeatmap {
                     objectName: "year-report-heatmap"
                     report: root.report
-                    year: root.year
+                    endDate: root.inclusiveReportEndDate()
                     formatSeconds: root.board.formatSeconds
                     onDaySelected: function(date) { root.selectDay(date) }
                 }

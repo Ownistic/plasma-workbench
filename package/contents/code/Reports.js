@@ -208,7 +208,7 @@ function monthlyReport(timeMath, input) {
 
 function yearlyReport(timeMath, input) {
     input = input || {}
-    const range = timeMath.yearRange(input.year, input.timezoneId)
+    const range = timeMath.trailingYearRange(input.year, input.month, input.day, input.timezoneId)
     if (!range.valid) {
         throw new Error(range.error)
     }

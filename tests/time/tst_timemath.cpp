@@ -13,6 +13,7 @@ private slots:
     void calculatesWeekRange();
     void calculatesMonthRange();
     void calculatesYearRange();
+    void calculatesTrailingYearRange();
     void convertsUtcToLocalDate();
     void convertsUtcToLocalParts();
     void resolvesNormalLocalTime();
@@ -102,6 +103,18 @@ void TimeMathTest::calculatesYearRange()
     QCOMPARE(range.value(QStringLiteral("endUtc")).toString(), QStringLiteral("2024-12-31T23:00:00.000Z"));
 }
 
+void TimeMathTest::calculatesTrailingYearRange()
+{
+    TimeMath timeMath;
+    const QVariantMap range = timeMath.trailingYearRange(2024, 10, 27, QStringLiteral("Europe/Berlin"));
+
+    QVERIFY(range.value(QStringLiteral("valid")).toBool());
+    QCOMPARE(range.value(QStringLiteral("startDate")).toString(), QStringLiteral("2023-10-29"));
+    QCOMPARE(range.value(QStringLiteral("endDateExclusive")).toString(), QStringLiteral("2024-10-28"));
+    QCOMPARE(range.value(QStringLiteral("startUtc")).toString(), QStringLiteral("2023-10-28T22:00:00.000Z"));
+    QCOMPARE(range.value(QStringLiteral("endUtc")).toString(), QStringLiteral("2024-10-27T23:00:00.000Z"));
+}
+
 void TimeMathTest::convertsUtcToLocalDate()
 {
     TimeMath timeMath;
@@ -185,6 +198,7 @@ void TimeMathTest::rejectsInvalidInput()
     QVERIFY(!timeMath.dayRange(2024, 2, 30, QStringLiteral("Europe/Berlin")).value(QStringLiteral("valid")).toBool());
     QVERIFY(!timeMath.weekRange(2024, 2, 30, QStringLiteral("Europe/Berlin")).value(QStringLiteral("valid")).toBool());
     QVERIFY(!timeMath.monthRange(2024, 13, QStringLiteral("Europe/Berlin")).value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.trailingYearRange(2024, 2, 30, QStringLiteral("Europe/Berlin")).value(QStringLiteral("valid")).toBool());
     QVERIFY(!timeMath.weekRange(2024, 1, 1, QStringLiteral("Mars/Olympus")).value(QStringLiteral("valid")).toBool());
     QVERIFY(timeMath.splitInterval(
         QStringLiteral("2024-01-01T00:00:00.000Z"),
