@@ -2,7 +2,11 @@
 
 A card-based task manager and work-time tracker for KDE Plasma.
 
-Workbench keeps tasks, status, categories, tracked time, and work reports directly on the Plasma desktop.
+Workbench keeps tasks, status, tabbed workspaces, categories, tracked time, and work reports directly on the Plasma desktop.
+
+The board hierarchy is `workspace tab → category → task`. This keeps contexts
+such as Personal and Work separate while still allowing each workspace to use
+its own project-oriented categories.
 
 ## Screenshots
 
@@ -69,6 +73,35 @@ Use the convenience scripts for a user-scoped install, upgrade, or removal:
 ./scripts/remove.sh
 ```
 
+## Plane sync
+
+`scripts/sync-plane.py` imports assigned Plane work items into the `4leaflabs`
+workspace without changing Plane. Live pulls route each item to the category
+matching its Plane project. It previews changes unless
+`--apply` is supplied, preserves work sessions, and records stable Plane IDs so
+repeated pulls do not create duplicates.
+
+Use a normalized JSON snapshot:
+
+```sh
+./scripts/sync-plane.py assigned-items.json
+./scripts/sync-plane.py assigned-items.json --apply
+```
+
+For a live read-only pull, keep the Plane personal access token in the process
+environment rather than in the repository or widget configuration:
+
+```sh
+PLANE_API_KEY='plane_api_…' ./scripts/sync-plane.py \
+  --assignee USER_UUID
+PLANE_API_KEY='plane_api_…' ./scripts/sync-plane.py \
+  --assignee USER_UUID --apply
+```
+
+The script has no Plane write path. Local edits to linked tasks are marked as
+pending instead of being overwritten; simultaneous local and remote edits are
+marked as conflicts.
+
 ## Compatibility
 
 The Plasma package and LocalStorage database identifier remains
@@ -102,4 +135,3 @@ Install `plasma-sdk` before visual testing with `plasmoidviewer`.
 - [PERSISTENCE_AND_REPORTING.md](PERSISTENCE_AND_REPORTING.md): Schema, transitions, and report rules.
 - [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md): Environment, tests, and release workflow.
 - [REFERENCES.md](REFERENCES.md): Primary upstream references.
-

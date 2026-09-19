@@ -50,6 +50,31 @@ TestCase {
         compare(Database.listCategories()[0].id, category.id)
     }
 
+    function test_workspacesScopeCategoriesAndTasks() {
+        const initialWorkspace = Database.listWorkspaces()[0]
+        const workWorkspace = Database.createWorkspace({ name: "Work" })
+        const personalCategory = Database.createCategory({
+            workspaceId: initialWorkspace.id, name: "Personal", color: "#3daee9"
+        })
+        const workCategory = Database.createCategory({
+            workspaceId: workWorkspace.id, name: "Engineering", color: "#8ae234"
+        })
+        Database.createTask({ categoryId: personalCategory.id, title: "Personal task", status: "ready" })
+        Database.createTask({ categoryId: workCategory.id, title: "Work task", status: "in_progress" })
+
+        compare(Database.listWorkspaces().length, 2)
+        compare(Database.listCategories(initialWorkspace.id).length, 1)
+        compare(Database.listCategories(workWorkspace.id)[0].id, workCategory.id)
+        compare(Database.listTasks({ workspaceId: initialWorkspace.id })[0].title, "Personal task")
+        compare(Database.listTasks({ workspaceId: workWorkspace.id })[0].title, "Work task")
+
+        Database.updateCategory({ id: personalCategory.id, workspaceId: workWorkspace.id })
+        compare(Database.listCategories(initialWorkspace.id).length, 0)
+        compare(Database.listCategories(workWorkspace.id).length, 2)
+        compare(Database.listTasks({ workspaceId: initialWorkspace.id }).length, 0)
+        compare(Database.listTasks({ workspaceId: workWorkspace.id }).length, 2)
+    }
+
     function test_taskCreationAndFiltering() {
         const category = createCategory("Product")
         const ready = createTask(category.id, "Ship first version", "ready")

@@ -359,10 +359,11 @@ function reconcileStatusHistory(tx, taskId) {
     return { status: previousStatus, occurredAtUtc: current.occurred_at_utc }
 }
 
-function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
+function positionForCategoryMove(tx, workspaceId, categoryId, targetCategoryId, placement) {
     const ordered = rows(tx.executeSql(
-        "SELECT id, position FROM categories WHERE trashed_at_utc IS NULL AND id <> ? ORDER BY position, created_at_utc, id",
-        [categoryId]
+        "SELECT id, position FROM categories WHERE workspace_id = ? AND trashed_at_utc IS NULL AND id <> ? " +
+        "ORDER BY position, created_at_utc, id",
+        [workspaceId, categoryId]
     ))
     let index = ordered.length
     if (targetCategoryId) {
@@ -378,14 +379,19 @@ function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
     let next = index < ordered.length ? ordered[index].position : null
     if ((previous !== null && next !== null && next - previous < 2)
         || (previous === null && next !== null && next < 2)) {
-        tx.executeSql("UPDATE categories SET position = position + ? WHERE trashed_at_utc IS NULL", [POSITION_OFFSET])
+        tx.executeSql(
+            "UPDATE categories SET position = position + ? WHERE workspace_id = ? AND trashed_at_utc IS NULL",
+            [POSITION_OFFSET, workspaceId]
+        )
         const categories = rows(tx.executeSql(
-            "SELECT id FROM categories WHERE trashed_at_utc IS NULL ORDER BY position, created_at_utc, id"
+            "SELECT id FROM categories WHERE workspace_id = ? AND trashed_at_utc IS NULL " +
+            "ORDER BY position, created_at_utc, id",
+            [workspaceId]
         ))
         for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex += 1) {
             tx.executeSql("UPDATE categories SET position = ? WHERE id = ?", [(categoryIndex + 1) * POSITION_GAP, categories[categoryIndex].id])
         }
-        return positionForCategoryMove(tx, categoryId, targetCategoryId, placement)
+        return positionForCategoryMove(tx, workspaceId, categoryId, targetCategoryId, placement)
     }
     if (previous === null && next === null) {
         return POSITION_GAP
@@ -399,10 +405,60 @@ function positionForCategoryMove(tx, categoryId, targetCategoryId, placement) {
     return previous + Math.floor((next - previous) / 2)
 }
 
-function listCategories() {
+function workspaceById(tx, workspaceId) {
+    const workspace = first(tx.executeSql("SELECT * FROM workspaces WHERE id = ?", [workspaceId]))
+    if (!workspace) {
+        fail("The workspace does not exist.")
+    }
+    return workspace
+}
+
+function defaultWorkspace(tx) {
+    const workspace = first(tx.executeSql("SELECT * FROM workspaces ORDER BY position, created_at_utc, id LIMIT 1"))
+    if (!workspace) {
+        fail("At least one workspace is required.")
+    }
+    return workspace
+}
+
+function listWorkspaces() {
+    return read(function(tx) {
+        return rows(tx.executeSql("SELECT * FROM workspaces ORDER BY position, created_at_utc, id"))
+    })
+}
+
+function createWorkspace(input) {
+    input = input || {}
+    const name = normalizedText(input.name, "Workspace name", 100)
+    return write(function(tx) {
+        const timestamp = nowUtc()
+        const workspace = {
+            id: newId(), name: name,
+            position: nextPosition(tx, "workspaces", "", []),
+            created_at_utc: timestamp, updated_at_utc: timestamp
+        }
+        tx.executeSql(
+            "INSERT INTO workspaces (id, name, position, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?)",
+            [workspace.id, workspace.name, workspace.position, workspace.created_at_utc, workspace.updated_at_utc]
+        )
+        return workspace
+    })
+}
+
+function listCategories(workspaceId) {
     purgeExpiredTrash()
     return read(function(tx) {
-        return rows(tx.executeSql("SELECT * FROM categories WHERE trashed_at_utc IS NULL ORDER BY position, created_at_utc, id"))
+        if (workspaceId) {
+            workspaceById(tx, workspaceId)
+            return rows(tx.executeSql(
+                "SELECT * FROM categories WHERE workspace_id = ? AND trashed_at_utc IS NULL " +
+                "ORDER BY position, created_at_utc, id",
+                [workspaceId]
+            ))
+        }
+        return rows(tx.executeSql(
+            "SELECT * FROM categories WHERE trashed_at_utc IS NULL ORDER BY workspace_id, position, created_at_utc, id"
+        ))
     })
 }
 
@@ -461,10 +517,20 @@ function listActiveCategorySessions() {
     })
 }
 
-function listTrashedCategories() {
+function listTrashedCategories(workspaceId) {
     purgeExpiredTrash()
     return read(function(tx) {
-        return rows(tx.executeSql("SELECT * FROM categories WHERE trashed_at_utc IS NOT NULL ORDER BY trashed_at_utc DESC, position, id"))
+        if (workspaceId) {
+            workspaceById(tx, workspaceId)
+            return rows(tx.executeSql(
+                "SELECT * FROM categories WHERE workspace_id = ? AND trashed_at_utc IS NOT NULL " +
+                "ORDER BY trashed_at_utc DESC, position, id",
+                [workspaceId]
+            ))
+        }
+        return rows(tx.executeSql(
+            "SELECT * FROM categories WHERE trashed_at_utc IS NOT NULL ORDER BY trashed_at_utc DESC, position, id"
+        ))
     })
 }
 
@@ -473,19 +539,23 @@ function createCategory(input) {
     const name = normalizedText(input.name, "Category name", 100)
     const color = normalizedText(input.color || "#3daee9", "Category color", 32)
     return write(function(tx) {
+        const workspace = input.workspaceId ? workspaceById(tx, requireId(input.workspaceId, "Workspace ID")) : defaultWorkspace(tx)
         const timestamp = nowUtc()
         const category = {
             id: newId(),
+            workspace_id: workspace.id,
             name: name,
             color: color,
-            position: nextPosition(tx, "categories", "WHERE trashed_at_utc IS NULL", []),
+            position: nextPosition(tx, "categories", "WHERE workspace_id = ? AND trashed_at_utc IS NULL", [workspace.id]),
             collapsed: input.collapsed ? 1 : 0,
             created_at_utc: timestamp,
             updated_at_utc: timestamp
         }
         tx.executeSql(
-            "INSERT INTO categories (id, name, color, position, collapsed, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [category.id, category.name, category.color, category.position, category.collapsed, category.created_at_utc, category.updated_at_utc]
+            "INSERT INTO categories (id, workspace_id, name, color, position, collapsed, created_at_utc, updated_at_utc) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [category.id, category.workspace_id, category.name, category.color, category.position,
+             category.collapsed, category.created_at_utc, category.updated_at_utc]
         )
         return category
     })
@@ -499,12 +569,19 @@ function updateCategory(input) {
         const name = input.name === undefined ? current.name : normalizedText(input.name, "Category name", 100)
         const color = input.color === undefined ? current.color : normalizedText(input.color, "Category color", 32)
         const collapsed = input.collapsed === undefined ? current.collapsed : (input.collapsed ? 1 : 0)
+        const workspace = input.workspaceId === undefined
+            ? workspaceById(tx, current.workspace_id)
+            : workspaceById(tx, requireId(input.workspaceId, "Workspace ID"))
+        const position = workspace.id === current.workspace_id ? current.position
+            : nextPosition(tx, "categories", "WHERE workspace_id = ? AND trashed_at_utc IS NULL", [workspace.id])
         const timestamp = nowUtc()
         tx.executeSql(
-            "UPDATE categories SET name = ?, color = ?, collapsed = ?, updated_at_utc = ? WHERE id = ?",
-            [name, color, collapsed, timestamp, categoryId]
+            "UPDATE categories SET workspace_id = ?, name = ?, color = ?, collapsed = ?, position = ?, " +
+            "updated_at_utc = ? WHERE id = ?",
+            [workspace.id, name, color, collapsed, position, timestamp, categoryId]
         )
-        return { id: categoryId, name: name, color: color, collapsed: collapsed }
+        return { id: categoryId, workspaceId: workspace.id, name: name, color: color,
+            collapsed: collapsed, position: position }
     })
 }
 
@@ -518,7 +595,11 @@ function moveCategory(input) {
         if (targetCategoryId) {
             activeCategoryById(tx, targetCategoryId)
         }
-        const position = positionForCategoryMove(tx, categoryId, targetCategoryId, placement)
+        const category = activeCategoryById(tx, categoryId)
+        if (targetCategoryId && categoryById(tx, targetCategoryId).workspace_id !== category.workspace_id) {
+            fail("Categories can only be reordered within the same workspace.")
+        }
+        const position = positionForCategoryMove(tx, category.workspace_id, categoryId, targetCategoryId, placement)
         tx.executeSql("UPDATE categories SET position = ?, updated_at_utc = ? WHERE id = ?", [position, nowUtc(), categoryId])
         return position
     })
@@ -553,7 +634,7 @@ function restoreCategory(categoryId) {
             return category
         }
         const timestamp = nowUtc()
-        const position = nextPosition(tx, "categories", "WHERE trashed_at_utc IS NULL", [])
+        const position = nextPosition(tx, "categories", "WHERE workspace_id = ? AND trashed_at_utc IS NULL", [category.workspace_id])
         tx.executeSql(
             "UPDATE categories SET trashed_at_utc = NULL, position = ?, updated_at_utc = ? WHERE id = ?",
             [position, timestamp, categoryId]
@@ -576,12 +657,18 @@ function listTasks(filter) {
     purgeExpiredTrash()
     const statuses = filter.statuses || []
     const showArchived = filter.showArchived === true
+    const workspaceId = filter.workspaceId || ""
     for (let index = 0; index < statuses.length; index += 1) {
         requireStatus(statuses[index])
     }
     return read(function(tx) {
         const clauses = ["categories.trashed_at_utc IS NULL", showArchived ? "1 = 1" : "tasks.archived_at_utc IS NULL"]
         const parameters = []
+        if (workspaceId) {
+            workspaceById(tx, workspaceId)
+            clauses.push("categories.workspace_id = ?")
+            parameters.push(workspaceId)
+        }
         if (statuses.length > 0) {
             clauses.push("tasks.status IN (" + statuses.map(function() { return "?" }).join(", ") + ")")
             for (let index = 0; index < statuses.length; index += 1) {
@@ -589,7 +676,8 @@ function listTasks(filter) {
             }
         }
         return rows(tx.executeSql(
-            "SELECT tasks.id AS taskId, tasks.category_id AS categoryId, categories.name AS categoryName, " +
+            "SELECT tasks.id AS taskId, tasks.category_id AS categoryId, categories.workspace_id AS workspaceId, " +
+            "categories.name AS categoryName, " +
             "categories.color AS categoryColor, categories.collapsed AS categoryCollapsed, tasks.title, tasks.details, " +
             "tasks.status, tasks.position, tasks.archived_at_utc AS archivedAtUtc, " +
             "tasks.tracked_seconds AS trackedSeconds, " +

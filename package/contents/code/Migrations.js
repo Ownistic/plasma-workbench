@@ -1,6 +1,6 @@
 .pragma library
 
-const CURRENT_VERSION = 6
+const CURRENT_VERSION = 8
 
 const migrations = [
     {
@@ -99,6 +99,63 @@ const migrations = [
         statements: [
             "DROP INDEX IF EXISTS one_active_work_session_idx"
         ]
+    },
+    {
+        version: 7,
+        statements: [
+            "CREATE TABLE IF NOT EXISTS external_tasks (" +
+                "provider TEXT NOT NULL, remote_id TEXT NOT NULL, task_id TEXT NOT NULL, " +
+                "remote_key TEXT NOT NULL, remote_url TEXT NOT NULL, project_id TEXT, " +
+                "remote_updated_at TEXT, last_local_updated_at TEXT NOT NULL, " +
+                "last_synced_at TEXT NOT NULL, sync_state TEXT NOT NULL DEFAULT 'in_sync', " +
+                "remote_payload_json TEXT NOT NULL DEFAULT '{}', " +
+                "PRIMARY KEY (provider, remote_id), UNIQUE (task_id), " +
+                "FOREIGN KEY (task_id) REFERENCES tasks(id) ON UPDATE CASCADE ON DELETE CASCADE, " +
+                "CHECK (sync_state IN ('in_sync', 'pending_push', 'conflict'))) ",
+            "CREATE INDEX IF NOT EXISTS external_tasks_provider_key_idx ON external_tasks(provider, remote_key)",
+            "CREATE TRIGGER IF NOT EXISTS external_tasks_task_exists_insert " +
+                "BEFORE INSERT ON external_tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'External task does not exist'); END",
+            "CREATE TRIGGER IF NOT EXISTS external_tasks_task_exists_update " +
+                "BEFORE UPDATE OF task_id ON external_tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'External task does not exist'); END"
+        ]
+    },
+    {
+        version: 8,
+        statements: [
+            "CREATE TABLE IF NOT EXISTS workspaces (" +
+                "id TEXT PRIMARY KEY, name TEXT NOT NULL, position INTEGER NOT NULL, " +
+                "created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL, " +
+                "CHECK (length(trim(name)) BETWEEN 1 AND 100))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS workspaces_position_idx ON workspaces(position)",
+            "INSERT OR IGNORE INTO workspaces (id, name, position, created_at_utc, updated_at_utc) " +
+                "SELECT 'workspace-4leaflabs', '4leaflabs', 1024, ?, ? " +
+                "WHERE EXISTS (SELECT 1 FROM categories WHERE lower(name) = '4leaflabs')",
+            "INSERT OR IGNORE INTO workspaces (id, name, position, created_at_utc, updated_at_utc) " +
+                "SELECT 'workspace-personal', 'Personal', 2048, ?, ? " +
+                "WHERE EXISTS (SELECT 1 FROM categories WHERE lower(name) = 'personal')",
+            "INSERT OR IGNORE INTO workspaces (id, name, position, created_at_utc, updated_at_utc) " +
+                "SELECT 'workspace-default', 'Workspace', 1024, ?, ? WHERE NOT EXISTS (SELECT 1 FROM workspaces)",
+            "ALTER TABLE categories ADD COLUMN workspace_id TEXT",
+            "UPDATE categories SET workspace_id = CASE " +
+                "WHEN lower(name) = '4leaflabs' AND EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace-4leaflabs') THEN 'workspace-4leaflabs' " +
+                "WHEN lower(name) = 'personal' AND EXISTS (SELECT 1 FROM workspaces WHERE id = 'workspace-personal') THEN 'workspace-personal' " +
+                "ELSE (SELECT id FROM workspaces ORDER BY position, id LIMIT 1) END",
+            "DROP INDEX IF EXISTS categories_active_position_idx",
+            "CREATE UNIQUE INDEX IF NOT EXISTS categories_workspace_position_idx ON categories(workspace_id, position) WHERE trashed_at_utc IS NULL",
+            "CREATE INDEX IF NOT EXISTS categories_workspace_idx ON categories(workspace_id)",
+            "CREATE TRIGGER IF NOT EXISTS categories_workspace_required_insert " +
+                "BEFORE INSERT ON categories FOR EACH ROW WHEN NEW.workspace_id IS NULL OR NOT EXISTS " +
+                "(SELECT 1 FROM workspaces WHERE id = NEW.workspace_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Category workspace does not exist'); END",
+            "CREATE TRIGGER IF NOT EXISTS categories_workspace_required_update " +
+                "BEFORE UPDATE OF workspace_id ON categories FOR EACH ROW WHEN NEW.workspace_id IS NULL OR NOT EXISTS " +
+                "(SELECT 1 FROM workspaces WHERE id = NEW.workspace_id) " +
+                "BEGIN SELECT RAISE(ABORT, 'Category workspace does not exist'); END"
+        ]
     }
 ]
 
@@ -123,7 +180,10 @@ function apply(tx, appliedAtUtc) {
             continue
         }
         for (let statementIndex = 0; statementIndex < migration.statements.length; statementIndex += 1) {
-            tx.executeSql(migration.statements[statementIndex])
+            const statement = migration.statements[statementIndex]
+            const parameters = migration.version === 8 && statement.indexOf("SELECT 'workspace-") !== -1
+                ? [appliedAtUtc, appliedAtUtc] : []
+            tx.executeSql(statement, parameters)
         }
         tx.executeSql(
             "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (?, ?)",

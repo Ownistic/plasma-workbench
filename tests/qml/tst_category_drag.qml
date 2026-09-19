@@ -103,6 +103,25 @@ TestCase {
         }
     }
 
+    function test_workspaceTabsScopeCategoriesAndTasks() {
+        const work = Database.createWorkspace({ name: "Work" })
+        const engineering = Database.createCategory({
+            workspaceId: work.id, name: "Engineering", color: "#75507b"
+        })
+        Database.createTask({ categoryId: engineering.id, title: "Workspace task", status: "ready" })
+        board.reload()
+
+        compare(board.workspaces.count, 2)
+        compare(board.categories.count, 2)
+        verify(findChild(board, "workspace-tabs") !== null)
+        verify(findChild(board, "workspace-tab-" + work.id) !== null)
+
+        board.selectWorkspace(work.id)
+        compare(board.selectedWorkspaceId, work.id)
+        compare(board.categories.count, 1)
+        compare(board.categories.get(0).id, engineering.id)
+    }
+
     function test_emptyCategoryActionsMenuDeletesToTrash() {
         const emptyCategory = Database.createCategory({ name: "Empty", color: "#f67400" })
         board.reload()

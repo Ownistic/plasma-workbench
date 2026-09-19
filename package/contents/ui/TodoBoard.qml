@@ -14,8 +14,11 @@ Item {
 
     required property var plasmoidConfiguration
     required property var plasmoidRoot
+    property alias workspaces: workspaceModel
     property var selectedStatuses: []
     property alias categories: categoryModel
+    property string selectedWorkspaceId: ""
+    property var tasksByCategory: ({})
     property alias categoryDeleteConfirmation: categoryDeleteDialog
     property string currentPage: "board"
     property string moveError: ""
@@ -60,6 +63,7 @@ Item {
     readonly property bool allowConcurrentTimers: root.plasmoidConfiguration.allowConcurrentTimers === true
 
     ListModel { id: taskModel }
+    ListModel { id: workspaceModel }
     ListModel { id: categoryModel }
     ListModel { id: visibleCategoryModel }
 
@@ -219,13 +223,22 @@ Item {
         root.currentPage = "reports"
     }
 
-    function reload() {
+    function reloadWorkspace() {
         const tasks = Database.listTasks({
             statuses: root.selectedStatuses,
-            showArchived: root.plasmoidConfiguration.showArchivedTasks
+            showArchived: root.plasmoidConfiguration.showArchivedTasks,
+            workspaceId: root.selectedWorkspaceId
         })
-        const categories = Database.listCategories()
-        root.refreshCategoryTimes()
+        const categories = Database.listCategories(root.selectedWorkspaceId)
+        const groupedTasks = {}
+        for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
+            const task = tasks[taskIndex]
+            if (!groupedTasks[task.categoryId]) {
+                groupedTasks[task.categoryId] = []
+            }
+            groupedTasks[task.categoryId].push(task)
+        }
+        root.tasksByCategory = groupedTasks
         taskModel.clear()
         categoryModel.clear()
         visibleCategoryModel.clear()
@@ -236,10 +249,39 @@ Item {
         for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
             taskModel.append(tasks[taskIndex])
         }
+    }
+
+    function reload() {
+        const workspaces = Database.listWorkspaces()
+        workspaceModel.clear()
+        for (let workspaceIndex = 0; workspaceIndex < workspaces.length; workspaceIndex += 1) {
+            workspaceModel.append(workspaces[workspaceIndex])
+        }
+        if (!root.selectedWorkspaceId || root.workspaceIndex(root.selectedWorkspaceId) < 0) {
+            root.selectedWorkspaceId = workspaces.length > 0 ? workspaces[0].id : ""
+        }
+        root.reloadWorkspace()
+        root.refreshCategoryTimes()
         root.plasmoidRoot.activeSessions = Database.getActiveSessions()
         if (!root.allowConcurrentTimers && root.activeSessions.length > 1 && !concurrentTimerResolutionDialog.visible) {
             root.keepActiveTaskId = root.activeSessions[0].task_id
             concurrentTimerResolutionDialog.open()
+        }
+    }
+
+    function workspaceIndex(workspaceId) {
+        for (let index = 0; index < workspaceModel.count; index += 1) {
+            if (workspaceModel.get(index).id === workspaceId) {
+                return index
+            }
+        }
+        return -1
+    }
+
+    function selectWorkspace(workspaceId) {
+        if (workspaceId && workspaceId !== root.selectedWorkspaceId) {
+            root.selectedWorkspaceId = workspaceId
+            root.reloadWorkspace()
         }
     }
 
@@ -661,6 +703,110 @@ Item {
             }
         }
 
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.smallSpacing
+
+            Rectangle {
+                Layout.preferredWidth: Math.min(boardContent.width - createWorkspaceButton.implicitWidth
+                    - Kirigami.Units.smallSpacing, Math.max(Kirigami.Units.gridUnit * 16,
+                    workspaceModel.count * Kirigami.Units.gridUnit * 8))
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 2.25
+                color: Kirigami.Theme.alternateBackgroundColor
+                border.color: Qt.alpha(Kirigami.Theme.textColor, 0.18)
+                border.width: 1
+                radius: Kirigami.Units.smallSpacing
+
+                Row {
+                    id: workspaceTabs
+                    objectName: "workspace-tabs"
+                    anchors.fill: parent
+                    anchors.margins: 3
+                    spacing: 3
+
+                    Repeater {
+                        model: workspaceModel
+
+                        Controls.AbstractButton {
+                            id: workspaceTab
+                            required property var model
+                            readonly property bool workspaceSelected: root.selectedWorkspaceId === model.id
+                            objectName: "workspace-tab-" + model.id
+                            width: (workspaceTabs.width
+                                - workspaceTabs.spacing * Math.max(0, workspaceModel.count - 1))
+                                / Math.max(1, workspaceModel.count)
+                            height: workspaceTabs.height
+                            hoverEnabled: true
+                            leftInset: 0
+                            rightInset: 0
+                            topInset: 0
+                            bottomInset: 0
+                            padding: Kirigami.Units.smallSpacing
+                            Accessible.name: i18n("Open %1 workspace", model.name)
+                            Accessible.role: Accessible.PageTab
+                            onClicked: root.selectWorkspace(model.id)
+
+                            background: Rectangle {
+                                radius: Math.max(2, Kirigami.Units.smallSpacing - 2)
+                                color: workspaceTab.workspaceSelected
+                                    ? Kirigami.Theme.highlightColor
+                                    : workspaceTab.hovered
+                                        ? Qt.alpha(Kirigami.Theme.textColor, 0.08) : "transparent"
+                                border.color: workspaceTab.workspaceSelected
+                                    ? Kirigami.Theme.highlightColor : "transparent"
+                                border.width: 1
+                            }
+
+                            contentItem: RowLayout {
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Kirigami.Icon {
+                                    Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                    Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                    source: model.name.toLowerCase() === "personal"
+                                        ? "user-home" : model.name.toLowerCase().indexOf("4leaf") !== -1
+                                            ? "office-building" : "view-grid"
+                                    color: workspaceTab.workspaceSelected
+                                        ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                }
+
+                                PlasmaComponents.Label {
+                                    Layout.fillWidth: true
+                                    text: model.name
+                                    font.bold: workspaceTab.workspaceSelected
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: workspaceTab.workspaceSelected
+                                        ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            PlasmaComponents.ToolButton {
+                id: createWorkspaceButton
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 2.25
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 2.25
+                icon.name: "tab-new"
+                Accessible.name: i18n("Create workspace")
+                onClicked: createWorkspaceDialog.open()
+
+                background: Rectangle {
+                    radius: Kirigami.Units.smallSpacing
+                    color: createWorkspaceButton.hovered
+                        ? Qt.alpha(Kirigami.Theme.highlightColor, 0.18)
+                        : Kirigami.Theme.alternateBackgroundColor
+                    border.color: Qt.alpha(Kirigami.Theme.textColor, 0.18)
+                    border.width: 1
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
         Flow {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
@@ -875,14 +1021,14 @@ Item {
                         }
 
                         Repeater {
-                            model: taskModel
+                            model: root.tasksByCategory[categorySlot.currentCategoryId] || []
 
                             delegate: Item {
                                 id: taskSlot
-                                required property var model
+                                required property var modelData
                                 width: parent.width
                                 opacity: categorySlot.draggingSource ? 0 : 1
-                                readonly property bool shown: model.categoryId === currentCategoryId && model.categoryCollapsed === 0
+                                readonly property bool shown: modelData.categoryCollapsed === 0
                                 readonly property bool insertionTarget: root.draggedTaskPreviewItem === taskSlot
                                 readonly property real placeholderHeight: insertionTarget
                                     ? (root.draggedTaskItem ? root.draggedTaskItem.implicitHeight : taskCard.implicitHeight) : 0
@@ -905,13 +1051,13 @@ Item {
                                         Rectangle {
                                             Layout.fillHeight: true
                                             Layout.preferredWidth: Kirigami.Units.smallSpacing
-                                            color: root.draggedTaskData ? root.draggedTaskData.categoryColor : model.categoryColor
+                                            color: root.draggedTaskData ? root.draggedTaskData.categoryColor : modelData.categoryColor
                                             radius: width / 2
                                         }
 
                                         PlasmaComponents.Label {
                                             Layout.fillWidth: true
-                                            text: root.draggedTaskData ? root.draggedTaskData.title : model.title
+                                            text: root.draggedTaskData ? root.draggedTaskData.title : modelData.title
                                             font.bold: true
                                             elide: Text.ElideRight
                                         }
@@ -926,13 +1072,13 @@ Item {
                                     z: 3
                             keys: ["application/x-workbench-task"]
                                     onEntered: function(drag) {
-                                        if (drag.source && drag.source.task && drag.source.task.taskId !== model.taskId) {
-                                            root.previewTaskMove(drag.source.task.taskId, model.taskId, model.categoryId, root.draggedTaskPlacement, taskSlot)
+                                        if (drag.source && drag.source.task && drag.source.task.taskId !== modelData.taskId) {
+                                            root.previewTaskMove(drag.source.task.taskId, modelData.taskId, modelData.categoryId, root.draggedTaskPlacement, taskSlot)
                                         }
                                     }
                                     onDropped: function(drop) {
-                                        if (drop.source && drop.source.task && drop.source.task.taskId !== model.taskId) {
-                                            root.commitTaskDrop(drop.source.task.taskId, model.taskId, model.categoryId, root.draggedTaskPlacement)
+                                        if (drop.source && drop.source.task && drop.source.task.taskId !== modelData.taskId) {
+                                            root.commitTaskDrop(drop.source.task.taskId, modelData.taskId, modelData.categoryId, root.draggedTaskPlacement)
                                             drop.acceptProposedAction()
                                         }
                                     }
@@ -943,7 +1089,7 @@ Item {
                                     anchors.right: parent.right
                                     height: 2
                                     y: root.draggedTaskPlacement === "after" ? parent.height - height : 0
-                                    visible: root.draggedTaskTargetId === model.taskId
+                                    visible: root.draggedTaskTargetId === modelData.taskId
                                     color: Kirigami.Theme.highlightColor
                                 }
 
@@ -955,25 +1101,25 @@ Item {
                                         ? taskSlot.placeholderHeight : 0
                                     z: dragging ? 2 : 1
                                     opacity: dragging ? 0 : 1
-                                    task: model
-                                    active: root.isTaskActive(model.taskId)
-                                    elapsedText: root.taskElapsedText(model)
-                                    canMoveUp: root.adjacentTask(model, -1) !== null
-                                    canMoveDown: root.adjacentTask(model, 1) !== null
-                                    onTimerRequested: root.toggleTimer(model)
-                                    onOpenRequested: root.openTask(model.taskId)
-                                    onMoveUpRequested: root.moveTask(model, root.adjacentTask(model, -1), "before")
-                                    onMoveDownRequested: root.moveTask(model, root.adjacentTask(model, 1), "after")
-                                    onMoveToCategoryRequested: moveTaskDialog.openForTask(model)
+                                    task: modelData
+                                    active: root.isTaskActive(modelData.taskId)
+                                    elapsedText: root.taskElapsedText(modelData)
+                                    canMoveUp: root.adjacentTask(modelData, -1) !== null
+                                    canMoveDown: root.adjacentTask(modelData, 1) !== null
+                                    onTimerRequested: root.toggleTimer(modelData)
+                                    onOpenRequested: root.openTask(modelData.taskId)
+                                    onMoveUpRequested: root.moveTask(modelData, root.adjacentTask(modelData, -1), "before")
+                                    onMoveDownRequested: root.moveTask(modelData, root.adjacentTask(modelData, 1), "after")
+                                    onMoveToCategoryRequested: moveTaskDialog.openForTask(modelData)
                                     onDragStarted: function(dragItem) {
-                                        root.beginTaskDrag(model, dragItem)
+                                        root.beginTaskDrag(modelData, dragItem)
                                     }
                                     onDragPreviewRequested: function(sourceTaskId, placement, targetItem) {
-                                        root.previewTaskMove(sourceTaskId, model.taskId, model.categoryId, placement, targetItem)
+                                        root.previewTaskMove(sourceTaskId, modelData.taskId, modelData.categoryId, placement, targetItem)
                                     }
                                     onDragFinished: root.finishTaskDrag()
                                     onDropRequested: function(sourceTaskId, placement) {
-                                        root.commitTaskDrop(sourceTaskId, model.taskId, model.categoryId, placement)
+                                        root.commitTaskDrop(sourceTaskId, modelData.taskId, modelData.categoryId, placement)
                                     }
                                 }
                             }
@@ -1281,6 +1427,33 @@ Item {
     }
 
     Controls.Dialog {
+        id: createWorkspaceDialog
+        objectName: "create-workspace-dialog"
+        parent: root
+        modal: true
+        title: i18n("Create workspace")
+        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
+
+        onOpened: {
+            workspaceName.text = ""
+            workspaceName.forceActiveFocus()
+        }
+        onAccepted: {
+            const workspace = Database.createWorkspace({ name: workspaceName.text })
+            root.selectedWorkspaceId = workspace.id
+            root.reload()
+        }
+
+        contentItem: PlasmaComponents.TextField {
+            id: workspaceName
+            objectName: "create-workspace-name"
+            implicitWidth: Kirigami.Units.gridUnit * 20
+            placeholderText: i18n("Workspace name")
+            Accessible.name: i18n("Workspace name")
+        }
+    }
+
+    Controls.Dialog {
         id: createTaskDialog
         objectName: "create-task-dialog"
         parent: root
@@ -1361,7 +1534,11 @@ Item {
             categoryName.forceActiveFocus()
         }
         onAccepted: {
-            Database.createCategory({ name: categoryName.text, color: "#3daee9" })
+            Database.createCategory({
+                name: categoryName.text,
+                color: "#3daee9",
+                workspaceId: root.selectedWorkspaceId
+            })
             root.reload()
         }
 
@@ -1387,6 +1564,7 @@ Item {
             categoryId = category.id
             categoryEditorName.text = category.name
             categoryEditorColor.text = category.color
+            categoryEditorWorkspace.currentIndex = Math.max(0, root.workspaceIndex(category.workspace_id))
             errorText = ""
             open()
             categoryEditorName.forceActiveFocus()
@@ -1394,7 +1572,12 @@ Item {
 
         onAccepted: {
             try {
-                Database.updateCategory({ id: categoryId, name: categoryEditorName.text, color: categoryEditorColor.text })
+                Database.updateCategory({
+                    id: categoryId,
+                    name: categoryEditorName.text,
+                    color: categoryEditorColor.text,
+                    workspaceId: workspaceModel.get(categoryEditorWorkspace.currentIndex).id
+                })
                 root.reload()
             } catch (error) {
                 errorText = error.message
@@ -1409,6 +1592,14 @@ Item {
                 Layout.fillWidth: true
                 placeholderText: i18n("Category name")
                 Accessible.name: i18n("Category name")
+            }
+
+            PlasmaComponents.ComboBox {
+                id: categoryEditorWorkspace
+                Layout.fillWidth: true
+                model: workspaceModel
+                textRole: "name"
+                Accessible.name: i18n("Category workspace")
             }
 
             PlasmaComponents.TextField {
@@ -1481,30 +1672,55 @@ Item {
         id: moveTaskDialog
         parent: root
         property var task: null
+        property var destinationCategories: []
         modal: true
         title: i18n("Move task to category")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Ok
 
         function openForTask(taskToMove) {
             task = taskToMove
+            moveTaskWorkspace.currentIndex = Math.max(0, root.workspaceIndex(taskToMove.workspaceId))
+            refreshCategories()
             moveTaskCategory.currentIndex = 0
             open()
             moveTaskCategory.forceActiveFocus()
         }
 
-        onAccepted: {
-            if (!task || categoryModel.count === 0) {
+        function refreshCategories() {
+            if (moveTaskWorkspace.currentIndex < 0 || moveTaskWorkspace.currentIndex >= workspaceModel.count) {
+                destinationCategories = []
                 return
             }
-            root.moveTaskById(task.taskId, null, categoryModel.get(moveTaskCategory.currentIndex).id, "before")
+            destinationCategories = Database.listCategories(workspaceModel.get(moveTaskWorkspace.currentIndex).id)
+            moveTaskCategory.currentIndex = destinationCategories.length > 0 ? 0 : -1
         }
 
-        contentItem: PlasmaComponents.ComboBox {
-            id: moveTaskCategory
+        onAccepted: {
+            if (!task || destinationCategories.length === 0 || moveTaskCategory.currentIndex < 0) {
+                return
+            }
+            root.moveTaskById(task.taskId, null, destinationCategories[moveTaskCategory.currentIndex].id, "before")
+        }
+
+        contentItem: ColumnLayout {
             implicitWidth: Kirigami.Units.gridUnit * 20
-            model: categoryModel
-            textRole: "name"
-            Accessible.name: i18n("Destination category")
+
+            PlasmaComponents.ComboBox {
+                id: moveTaskWorkspace
+                Layout.fillWidth: true
+                model: workspaceModel
+                textRole: "name"
+                Accessible.name: i18n("Destination workspace")
+                onActivated: moveTaskDialog.refreshCategories()
+            }
+
+            PlasmaComponents.ComboBox {
+                id: moveTaskCategory
+                Layout.fillWidth: true
+                model: moveTaskDialog.destinationCategories
+                textRole: "name"
+                Accessible.name: i18n("Destination category")
+            }
         }
     }
 
@@ -1517,7 +1733,7 @@ Item {
         property var trashedCategories: []
 
         function openTrash() {
-            trashedCategories = Database.listTrashedCategories()
+            trashedCategories = Database.listTrashedCategories(root.selectedWorkspaceId)
             open()
         }
 
@@ -1555,7 +1771,7 @@ Item {
                         Accessible.name: i18n("Restore category %1", modelData.name)
                         onClicked: {
                             Database.restoreCategory(modelData.id)
-                            categoryTrashDialog.trashedCategories = Database.listTrashedCategories()
+                            categoryTrashDialog.trashedCategories = Database.listTrashedCategories(root.selectedWorkspaceId)
                             root.reload()
                         }
                     }

@@ -16,12 +16,14 @@ TestCase {
             tx.executeSql("CREATE TABLE status_events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, previous_status TEXT, status TEXT NOT NULL, occurred_at_utc TEXT NOT NULL, manually_edited INTEGER NOT NULL DEFAULT 0, created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL)")
             tx.executeSql("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
             tx.executeSql("INSERT INTO schema_migrations (version, applied_at_utc) VALUES (1, '2026-01-01T00:00:00.000Z')")
+            tx.executeSql("INSERT INTO categories (id, name, color, position, collapsed, created_at_utc, updated_at_utc) VALUES ('work', '4leaflabs', '#3daee9', 1024, 0, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')")
+            tx.executeSql("INSERT INTO categories (id, name, color, position, collapsed, created_at_utc, updated_at_utc) VALUES ('personal', 'Personal', '#8ae234', 2048, 0, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')")
 
             Migrations.apply(tx, "2026-01-02T00:00:00.000Z")
 
             const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
-            compare(versions.rows.length, 6)
-            compare(versions.rows.item(5).version, 6)
+            compare(versions.rows.length, 8)
+            compare(versions.rows.item(7).version, 8)
             const categoryColumns = tx.executeSql("PRAGMA table_info(categories)")
             let hasTrashColumn = false
             for (let index = 0; index < categoryColumns.rows.length; index += 1) {
@@ -42,6 +44,21 @@ TestCase {
             verify(hasTrackedSecondsColumn)
             const activeTimerIndex = tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'one_active_work_session_idx'")
             compare(activeTimerIndex.rows.length, 0)
+            const externalTasks = tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'external_tasks'")
+            compare(externalTasks.rows.length, 1)
+            const workspaces = tx.executeSql("SELECT * FROM workspaces ORDER BY position")
+            compare(workspaces.rows.length, 2)
+            compare(workspaces.rows.item(0).name, "4leaflabs")
+            compare(workspaces.rows.item(1).name, "Personal")
+            let hasWorkspaceColumn = false
+            for (let index = 0; index < categoryColumns.rows.length; index += 1) {
+                hasWorkspaceColumn = hasWorkspaceColumn || categoryColumns.rows.item(index).name === "workspace_id"
+            }
+            verify(hasWorkspaceColumn)
+            compare(tx.executeSql("SELECT workspace_id FROM categories WHERE id = 'work'").rows.item(0).workspace_id,
+                "workspace-4leaflabs")
+            compare(tx.executeSql("SELECT workspace_id FROM categories WHERE id = 'personal'").rows.item(0).workspace_id,
+                "workspace-personal")
         })
     }
 }
