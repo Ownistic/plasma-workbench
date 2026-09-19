@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import os
 import shlex
+import sqlite3
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from io import BytesIO
 from pathlib import Path
 from threading import Thread
 from time import sleep
 from typing import cast
+from zoneinfo import ZoneInfo
 
 from appium import webdriver
 from appium.options.common.base import AppiumOptions
@@ -36,6 +38,8 @@ DRAG_TARGET_TASK_TITLE = "Target drop group"
 MAX_RSS_KIB = 768 * 1024
 MAX_RSS_GROWTH_KIB = 96 * 1024
 NAVIGATION_ITERATIONS = 10
+README_SCREENSHOT_FIXTURE = os.environ.get("WORKBENCH_README_SCREENSHOTS") == "1"
+README_HEATMAP_SESSION_OFFSETS = (3, 7, 12, 18, 26, 31, 39, 45, 52, 58, 64, 71, 78, 85, 88)
 
 
 def plasmawindowed_rss_kib(package_dir: Path) -> int:
@@ -236,6 +240,93 @@ class WorkbenchEndToEndTest(unittest.TestCase):
         reports_page.find_element(AppiumBy.NAME, "Back to tasks").click()
         self.element(f"Open daily timeline for {CATEGORY_NAME}")
 
+    def add_report_session(self, reports_page: WebElement, start_date: str, start_time: str,
+                           end_time: str, visible_session_count: int | None = None,
+                           capture_state: str = "") -> None:
+        add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
+        add_button.click()
+        editor = self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.ACCESSIBILITY_ID, "daily-session-editor")
+            )
+        )
+        fields = {
+            "daily-session-start-date": start_date,
+            "daily-session-start": start_time,
+            "daily-session-end-date": start_date,
+            "daily-session-end": end_time,
+        }
+        for field_id, value in fields.items():
+            field = editor.find_element(AppiumBy.ACCESSIBILITY_ID, field_id)
+            self.assert_contained(editor, field)
+            field.clear()
+            field.send_keys(value)
+        if capture_state:
+            self.capture_screenshot(capture_state)
+        editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-save").click()
+        self.wait.until(
+            conditions.invisibility_of_element_located(
+                (AppiumBy.ACCESSIBILITY_ID, "daily-session-editor")
+            )
+        )
+        if visible_session_count is not None:
+            self.wait.until(
+                lambda driver: len(driver.find_elements(
+                    AppiumBy.XPATH, "//*[contains(@accessibility-id, 'timeline-session-')]"
+                )) >= visible_session_count
+            )
+        add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
+        self.wait.until(lambda _driver, button=add_button: button.is_selected())
+
+    def seed_readme_heatmap_sessions(self, today: date) -> None:
+        """Populate the isolated Qt LocalStorage database without slow editor interactions."""
+        data_home = Path(os.environ["XDG_DATA_HOME"])
+        database_paths = list(data_home.glob("**/QML/OfflineStorage/Databases/*.sqlite"))
+        self.assertEqual(len(database_paths), 1, f"Expected one Qt LocalStorage database in {data_home}")
+
+        with sqlite3.connect(database_paths[0], timeout=10) as database:
+            task = database.execute(
+                "SELECT id FROM tasks WHERE title = ?", ("Polish daily timeline",)
+            ).fetchone()
+            timezone = database.execute(
+                "SELECT timezone_id FROM work_sessions ORDER BY started_at_utc LIMIT 1"
+            ).fetchone()
+            self.assertIsNotNone(task)
+            self.assertIsNotNone(timezone)
+            timezone_id = str(timezone[0])
+            zone = ZoneInfo(timezone_id)
+            created_at = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            sessions: list[tuple[str, str, str, str, str, int]] = []
+
+            for index, day_offset in enumerate(README_HEATMAP_SESSION_OFFSETS):
+                session_date = today - timedelta(days=day_offset)
+                start_hour = 9 + index % 3
+                end_hour = start_hour + 1 + index % 3
+                started_at = datetime.combine(session_date, time(start_hour), zone)
+                ended_at = datetime.combine(session_date, time(end_hour, 30 if index % 2 else 0), zone)
+                started_at_utc = started_at.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                ended_at_utc = ended_at.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                duration = int((ended_at - started_at).total_seconds())
+                sessions.append((
+                    f"readme-heatmap-{session_date.isoformat()}",
+                    str(task[0]),
+                    started_at_utc,
+                    ended_at_utc,
+                    timezone_id,
+                    duration,
+                ))
+
+            database.executemany(
+                "INSERT INTO work_sessions "
+                "(id, task_id, started_at_utc, ended_at_utc, timezone_id, manually_edited, note, created_at_utc, updated_at_utc) "
+                "VALUES (?, ?, ?, ?, ?, 1, '', ?, ?)",
+                [session[:5] + (created_at, created_at) for session in sessions],
+            )
+            database.execute(
+                "UPDATE tasks SET tracked_seconds = tracked_seconds + ? WHERE id = ?",
+                (sum(session[5] for session in sessions), str(task[0])),
+            )
+
     def test_report_navigation_remains_bounded(self) -> None:
         self.create_category()
         self.create_task(category_index=2)
@@ -269,38 +360,19 @@ class WorkbenchEndToEndTest(unittest.TestCase):
             (f"{anchor_hour + 1:02d}:00:00", f"{anchor_hour + 2:02d}:30:00"),
         ]
 
+        today = datetime.now(UTC).astimezone().date()
         for index, (start_time, end_time) in enumerate(session_times):
-            add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
-            add_button.click()
-            editor = self.wait.until(
-                conditions.presence_of_element_located(
-                    (AppiumBy.ACCESSIBILITY_ID, "daily-session-editor")
-                )
+            self.add_report_session(
+                reports_page,
+                today.isoformat(),
+                start_time,
+                end_time,
+                index + 1,
+                "editing" if index == len(session_times) - 1 else "",
             )
-            start_field = editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-start")
-            end_field = editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-end")
-            for field_id in ("daily-session-start-date", "daily-session-start",
-                             "daily-session-end-date", "daily-session-end"):
-                self.assert_contained(
-                    editor,
-                    editor.find_element(AppiumBy.ACCESSIBILITY_ID, field_id),
-                )
-            self.wait.until(lambda _driver, field=start_field: field.is_selected())
-            start_field.clear()
-            start_field.send_keys(start_time)
-            end_field.clear()
-            end_field.send_keys(end_time)
-            if index == len(session_times) - 1:
-                self.capture_screenshot("editing")
-            editor.find_element(AppiumBy.ACCESSIBILITY_ID, "daily-session-save").click()
-            self.wait.until(
-                lambda driver, expected=index + 1: len(driver.find_elements(
-                    AppiumBy.XPATH,
-                    "//*[contains(@accessibility-id, 'timeline-session-')]",
-                )) >= expected
-            )
-            add_button = reports_page.find_element(AppiumBy.ACCESSIBILITY_ID, "report-add-session")
-            self.wait.until(lambda _driver, button=add_button: button.is_selected())
+
+        if README_SCREENSHOT_FIXTURE:
+            self.seed_readme_heatmap_sessions(today)
 
         self.wait.until(
             conditions.presence_of_element_located(
@@ -309,7 +381,6 @@ class WorkbenchEndToEndTest(unittest.TestCase):
         )
         self.capture_screenshot("populated")
 
-        today = datetime.now(UTC).astimezone().date()
         reports_page.find_element(
             AppiumBy.ACCESSIBILITY_ID, "reports-year-tab"
         ).send_keys(Keys.SPACE)

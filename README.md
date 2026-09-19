@@ -14,6 +14,10 @@ Workbench keeps tasks, status, categories, tracked time, and work reports direct
 
 ![Workbench exact-time session editor below the daily timeline](docs/screenshots/workbench-session-editor.png)
 
+### Rolling year heatmap
+
+![Workbench rolling 365-day heatmap with three months of tracked work](docs/screenshots/workbench-year-heatmap.png)
+
 ## Build and Test
 
 The data repository is QML JavaScript using `QtQuick.LocalStorage`. A small Qt 6 QML module supplies IANA timezone and daylight-saving-safe report calculations.

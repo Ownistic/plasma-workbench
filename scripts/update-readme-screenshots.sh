@@ -15,7 +15,7 @@ command -v magick >/dev/null 2>&1 || {
     exit 1
 }
 
-ctest --test-dir "${BUILD_DIR}" -R '^WorkbenchAppiumE2E$' --output-on-failure
+WORKBENCH_README_SCREENSHOTS=1 ctest --test-dir "${BUILD_DIR}" -R '^WorkbenchAppiumE2E$' --output-on-failure
 mkdir -p "${OUTPUT_DIR}"
 
 magick "${ARTIFACT_DIR}/daily-editor-compact-board.png" \
@@ -27,5 +27,8 @@ magick "${ARTIFACT_DIR}/daily-editor-compact-populated.png" \
 magick "${ARTIFACT_DIR}/daily-editor-compact-editing.png" \
     -crop "${CAPTURE_GEOMETRY}" +repage -strip \
     "${OUTPUT_DIR}/workbench-session-editor.png"
+magick "${ARTIFACT_DIR}/daily-editor-compact-year-populated.png" \
+    -crop "${CAPTURE_GEOMETRY}" +repage -strip \
+    "${OUTPUT_DIR}/workbench-year-heatmap.png"
 
 echo "Updated README screenshots in ${OUTPUT_DIR}."
