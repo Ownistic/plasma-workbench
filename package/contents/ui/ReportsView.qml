@@ -356,8 +356,16 @@ FocusScope {
             Kirigami.Heading {
                 Layout.fillWidth: true
                 level: 2
-                text: root.title
+                text: i18n("Global %1", root.title)
             }
+        }
+
+        PlasmaComponents.Label {
+            objectName: "global-reports-scope"
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Kirigami.Theme.disabledTextColor
+            text: i18n("Time across all workbenches")
         }
 
         RowLayout {

@@ -281,6 +281,36 @@ TestCase {
         compare(active[0].task_id, tasks[1].taskId)
     }
 
+    function test_globalAndWorkbenchNavigationStayDistinct() {
+        const globalReports = findChild(board, "global-reports-button")
+        const globalSettings = findChild(board, "global-settings-button")
+        const workbenchSettings = findChild(board, "workbench-settings-button")
+        const workbenchPage = findChild(board, "workbench-settings-page")
+        const connectionState = findChild(workbenchPage, "workbench-connection-state")
+        const globalScope = findChild(board, "global-reports-scope")
+        verify(globalReports !== null)
+        verify(globalSettings !== null)
+        verify(workbenchSettings !== null)
+        verify(workbenchPage !== null)
+        compare(workbenchPage.visible, false)
+
+        workbenchSettings.click()
+        compare(board.currentPage, "workbench-settings")
+        compare(workbenchPage.visible, true)
+        verify(connectionState.text.indexOf("Local") >= 0)
+
+        board.closeWorkbenchSettings()
+        globalReports.click()
+        compare(board.currentPage, "reports")
+        verify(globalScope !== null)
+        compare(globalScope.text, "Time across all workbenches")
+        board.closeReports()
+
+        globalSettings.click()
+        compare(board.currentPage, "settings")
+        board.closeSettings()
+    }
+
     function test_categoryTimeTogglesBetweenTodayAndTotal() {
         const category = Database.listCategories()[0]
         const task = Database.listTasks({ statuses: ["ready"] })[0]

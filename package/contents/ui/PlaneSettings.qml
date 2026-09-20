@@ -34,6 +34,9 @@ ColumnLayout {
         stateRows = []
         message = ""
         failure = false
+        if (binding && binding.provider === "plane") {
+            refreshProjectsAndMappings()
+        }
     }
 
     function rememberBinding() {
@@ -44,6 +47,35 @@ ColumnLayout {
             config: { baseUrl: planeBaseUrl.text.trim(), workspace: planeWorkspace.text.trim(),
                 assigneeId: planeAssigneeId.text.trim() }
         })
+        board.notifyWorkspaceProviderChanged()
+    }
+
+    function refreshProjectsAndMappings() {
+        if (!binding || binding.provider !== "plane") {
+            return
+        }
+        if (!planeBaseUrl.text.trim() || !planeWorkspace.text.trim()) {
+            failure = true
+            message = i18n("Plane is configured, but its API URL or workspace slug is missing.")
+            return
+        }
+        failure = false
+        message = i18n("Loading Plane projects and category mappings…")
+        track(WorkbenchPlane.PlaneSync.fetchProjects(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim()), "projects")
+    }
+
+    function refreshMappedProjectMetadata() {
+        const mappings = Database.listProviderProjectMappings(board.selectedWorkspaceId)
+        const requestedProjects = {}
+        for (let index = 0; index < mappings.length; ++index) {
+            const mapping = mappings[index]
+            if (mapping.provider !== "plane" || requestedProjects[mapping.remoteProjectId]) {
+                continue
+            }
+            requestedProjects[mapping.remoteProjectId] = true
+            track(WorkbenchPlane.PlaneSync.fetchStates(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), mapping.remoteProjectId), "states:" + mapping.remoteProjectId)
+            track(WorkbenchPlane.PlaneSync.fetchMembers(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), mapping.remoteProjectId), "members:" + mapping.remoteProjectId)
+        }
     }
 
     function track(requestId, operation) {
@@ -81,18 +113,28 @@ ColumnLayout {
         return 0
     }
 
-    function saveCategoryMapping(categoryId, projectIndex) {
-        if (projectIndex <= 0 || projectIndex > projects.length) {
-            Database.removeProviderProjectMapping(categoryId)
-            return
+    function saveCategoryMapping(categoryId, categoryName, projectIndex) {
+        try {
+            if (projectIndex <= 0 || projectIndex > projects.length) {
+                Database.removeProviderProjectMapping(categoryId)
+                failure = false
+                message = i18n("Saved: %1 stays local to this workbench.", categoryName)
+                return
+            }
+            const project = projects[projectIndex - 1]
+            Database.saveProviderProjectMapping({
+                workspaceId: board.selectedWorkspaceId, categoryId: categoryId, provider: "plane",
+                remoteProjectId: project.id, remoteProjectName: project.name || project.identifier || project.id
+            })
+            failure = false
+            message = i18n("Saved: %1 now syncs with %2.", categoryName,
+                project.name || project.identifier || project.id)
+            track(WorkbenchPlane.PlaneSync.fetchStates(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), project.id), "states:" + project.id)
+            track(WorkbenchPlane.PlaneSync.fetchMembers(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), project.id), "members:" + project.id)
+        } catch (error) {
+            failure = true
+            message = error.message || i18n("Could not save the category mapping.")
         }
-        const project = projects[projectIndex - 1]
-        Database.saveProviderProjectMapping({
-            workspaceId: board.selectedWorkspaceId, categoryId: categoryId, provider: "plane",
-            remoteProjectId: project.id, remoteProjectName: project.name || project.identifier || project.id
-        })
-        track(WorkbenchPlane.PlaneSync.fetchStates(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), project.id), "states:" + project.id)
-        track(WorkbenchPlane.PlaneSync.fetchMembers(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), project.id), "members:" + project.id)
     }
 
     Layout.fillWidth: true
@@ -101,7 +143,7 @@ ColumnLayout {
     Kirigami.Heading {
         Layout.fillWidth: true
         level: 3
-        text: i18n("Plane integration")
+        text: root.binding && root.binding.provider === "plane" ? i18n("Plane connection") : i18n("Add Plane")
     }
 
     PlasmaComponents.Label {
@@ -144,7 +186,7 @@ ColumnLayout {
         Layout.fillWidth: true
 
         PlasmaComponents.Button {
-            text: i18n("Connect and discover")
+            text: root.binding && root.binding.provider === "plane" ? i18n("Save connection") : i18n("Connect and discover")
             enabled: board.selectedWorkspaceId.length > 0
             onClicked: root.connectAndDiscover()
         }
@@ -165,8 +207,28 @@ ColumnLayout {
                     return
                 }
                 Database.setWorkspaceProvider({ workspaceId: root.board.selectedWorkspaceId, provider: null })
+                root.board.notifyWorkspaceProviderChanged()
                 root.refresh()
             }
+        }
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+        visible: root.binding && root.binding.provider === "plane"
+
+        PlasmaComponents.Button {
+            objectName: "refresh-plane-projects-button"
+            icon.name: "view-refresh"
+            text: i18n("Refresh projects and mappings")
+            onClicked: root.refreshProjectsAndMappings()
+        }
+
+        PlasmaComponents.Label {
+            Layout.fillWidth: true
+            color: Kirigami.Theme.disabledTextColor
+            elide: Text.ElideRight
+            text: i18n("Mapping changes are saved to this workbench only.")
         }
     }
 
@@ -178,10 +240,34 @@ ColumnLayout {
         text: root.message
     }
 
+    Kirigami.Heading {
+        Layout.fillWidth: true
+        visible: root.binding && root.binding.provider === "plane" && root.projects.length > 0
+        level: 4
+        text: i18n("Category mappings")
+    }
+
+    PlasmaComponents.Label {
+        Layout.fillWidth: true
+        visible: root.binding && root.binding.provider === "plane" && root.projects.length > 0
+        wrapMode: Text.Wrap
+        color: Kirigami.Theme.disabledTextColor
+        text: i18n("Choose a Plane project for each category. Changes save immediately to this workbench.")
+    }
+
+    PlasmaComponents.Label {
+        Layout.fillWidth: true
+        visible: root.binding && root.binding.provider === "plane" && root.projects.length === 0 && !root.failure
+        wrapMode: Text.Wrap
+        color: Kirigami.Theme.disabledTextColor
+        text: i18n("Loading Plane projects. Once available, choose which local categories should sync.")
+    }
+
     Repeater {
         model: root.projects.length > 0 ? root.board.categories : []
 
         delegate: RowLayout {
+            id: categoryMappingRow
             required property var model
             Layout.fillWidth: true
 
@@ -196,8 +282,13 @@ ColumnLayout {
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 15
                 model: [{ id: "", name: i18n("Local only") }].concat(root.projects)
                 textRole: "name"
-                Component.onCompleted: currentIndex = root.projectIndex(model.id)
-                onActivated: root.saveCategoryMapping(model.id, currentIndex)
+                function restoreSavedMapping() {
+                    currentIndex = root.projectIndex(categoryMappingRow.model.id)
+                }
+                Component.onCompleted: restoreSavedMapping()
+                onModelChanged: restoreSavedMapping()
+                onActivated: root.saveCategoryMapping(categoryMappingRow.model.id,
+                    categoryMappingRow.model.name, currentIndex)
             }
         }
     }
@@ -255,6 +346,10 @@ ColumnLayout {
                 root.track(WorkbenchPlane.PlaneSync.fetchProjects(root.connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim()), "projects")
             } else if (operation === "projects") {
                 root.projects = result.data || []
+                root.refreshMappedProjectMetadata()
+                root.message = root.projects.length > 0
+                    ? i18n("Connected to Plane. Review category mappings for this workbench.")
+                    : i18n("Connected to Plane, but no projects were returned.")
             } else if (operation.indexOf("members:") === 0) {
                 const projectId = operation.slice("members:".length)
                 const members = (result.data || []).map(function(member) {

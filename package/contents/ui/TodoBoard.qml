@@ -19,6 +19,19 @@ Item {
     property var selectedStatuses: []
     property alias categories: categoryModel
     property string selectedWorkspaceId: ""
+    property int workspaceConnectionRevision: 0
+    readonly property var selectedWorkspaceProvider: {
+        workspaceConnectionRevision
+        return selectedWorkspaceId ? Database.getWorkspaceProvider(selectedWorkspaceId) : null
+    }
+    readonly property string selectedWorkspaceName: {
+        for (let index = 0; index < workspaceModel.count; ++index) {
+            if (workspaceModel.get(index).id === selectedWorkspaceId) {
+                return workspaceModel.get(index).name
+            }
+        }
+        return i18n("Local workbench")
+    }
     property var tasksByCategory: ({})
     property alias categoryDeleteConfirmation: categoryDeleteDialog
     property string currentPage: "board"
@@ -317,6 +330,20 @@ Item {
 
     function closeSettings() {
         root.currentPage = "board"
+    }
+
+    function openWorkbenchSettings() {
+        if (root.selectedWorkspaceId) {
+            root.currentPage = "workbench-settings"
+        }
+    }
+
+    function closeWorkbenchSettings() {
+        root.currentPage = "board"
+    }
+
+    function notifyWorkspaceProviderChanged() {
+        root.workspaceConnectionRevision += 1
     }
 
     function openReports(showMonthly) {
@@ -769,18 +796,6 @@ Item {
                 onClicked: categoryManagementDialog.open()
             }
 
-            PlasmaComponents.ToolButton {
-                icon.name: "office-chart-bar"
-                Accessible.name: i18n("Open reports")
-                onClicked: root.openReports(false)
-            }
-
-            PlasmaComponents.ToolButton {
-                objectName: "settings-button"
-                icon.name: "configure"
-                Accessible.name: i18n("Open settings")
-                onClicked: root.openSettings()
-            }
         }
 
         RowLayout {
@@ -788,9 +803,8 @@ Item {
             spacing: Kirigami.Units.smallSpacing
 
             Rectangle {
-                Layout.preferredWidth: Math.min(boardContent.width - createWorkspaceButton.implicitWidth
-                    - Kirigami.Units.smallSpacing, Math.max(Kirigami.Units.gridUnit * 16,
-                    workspaceModel.count * Kirigami.Units.gridUnit * 8))
+                Layout.fillWidth: true
+                Layout.minimumWidth: Kirigami.Units.gridUnit * 12
                 Layout.preferredHeight: Kirigami.Units.gridUnit * 2.25
                 color: Kirigami.Theme.alternateBackgroundColor
                 border.color: Qt.alpha(Kirigami.Theme.textColor, 0.18)
@@ -884,7 +898,71 @@ Item {
                 }
             }
 
-            Item { Layout.fillWidth: true }
+            PlasmaComponents.Button {
+                id: globalReportsButton
+                objectName: "global-reports-button"
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 2.25
+                icon.name: "office-chart-bar"
+                text: i18n("Reports")
+                Accessible.name: i18n("Open global reports across all workbenches")
+                onClicked: root.openReports(false)
+            }
+
+            PlasmaComponents.Button {
+                id: globalSettingsButton
+                objectName: "global-settings-button"
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 2.25
+                icon.name: "configure"
+                text: i18n("Global settings")
+                Accessible.name: i18n("Open global settings")
+                onClicked: root.openSettings()
+            }
+        }
+
+        RowLayout {
+            objectName: "workbench-context-bar"
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.smallSpacing
+
+            Kirigami.Icon {
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                source: root.selectedWorkspaceProvider ? "network-connect" : "folder"
+                color: root.selectedWorkspaceProvider
+                    ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
+            }
+
+            PlasmaComponents.Label {
+                objectName: "active-workbench-label"
+                Layout.fillWidth: true
+                font.bold: true
+                elide: Text.ElideRight
+                text: i18n("%1 workbench", root.selectedWorkspaceName)
+            }
+
+            PlasmaComponents.Label {
+                objectName: "plane-connection-status"
+                visible: root.selectedWorkspaceProvider !== null
+                text: i18n("Connected to Plane")
+                color: Kirigami.Theme.positiveTextColor
+                Accessible.name: text
+            }
+
+            PlasmaComponents.Label {
+                objectName: "local-workbench-status"
+                visible: root.selectedWorkspaceProvider === null
+                text: i18n("Local only")
+                color: Kirigami.Theme.disabledTextColor
+                Accessible.name: text
+            }
+
+            PlasmaComponents.ToolButton {
+                objectName: "workbench-settings-button"
+                icon.name: "configure"
+                text: i18n("Workbench settings")
+                Accessible.name: i18n("Open settings for %1", root.selectedWorkspaceName)
+                onClicked: root.openWorkbenchSettings()
+            }
         }
 
         Flow {
@@ -1420,6 +1498,15 @@ Item {
         board: root
         plasmoidConfiguration: root.plasmoidConfiguration
         onBackRequested: root.closeSettings()
+    }
+
+    WorkbenchSettingsPage {
+        id: workbenchSettingsPage
+        objectName: "workbench-settings-page"
+        anchors.fill: parent
+        visible: root.currentPage === "workbench-settings"
+        board: root
+        onBackRequested: root.closeWorkbenchSettings()
     }
 
     ReportsView {

@@ -29,8 +29,15 @@ Item {
             Kirigami.Heading {
                 Layout.fillWidth: true
                 level: 2
-                text: i18n("Settings")
+                text: i18n("Global settings")
             }
+        }
+
+        PlasmaComponents.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.Wrap
+            color: Kirigami.Theme.disabledTextColor
+            text: i18n("These preferences apply across every workbench. Provider connections and category mappings live in each workbench’s settings.")
         }
 
         PlasmaComponents.CheckBox {
@@ -48,21 +55,8 @@ Item {
             color: Kirigami.Theme.disabledTextColor
         }
 
-        Loader {
-            Layout.fillWidth: true
-            active: root.visible
-            sourceComponent: planeSettingsComponent
-        }
-
         Item {
             Layout.fillHeight: true
-        }
-    }
-
-    Component {
-        id: planeSettingsComponent
-        PlaneSettings {
-            board: root.board
         }
     }
 }
