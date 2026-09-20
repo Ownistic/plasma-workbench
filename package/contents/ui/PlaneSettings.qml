@@ -1,0 +1,300 @@
+import QtQuick
+import QtQuick.Controls as Controls
+import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
+import org.kde.plasma.components as PlasmaComponents
+import "plane" as WorkbenchPlane
+
+import "../code/Database.js" as Database
+
+/** Optional Plane connection controls for the currently selected local workspace.
+ *  The token is deliberately never read from, or written to, LocalStorage. */
+ColumnLayout {
+    id: root
+
+    required property var board
+    property var binding: null
+    property var projects: []
+    property var stateRows: []
+    property string message: ""
+    property bool failure: false
+    property var requests: ({})
+
+    function connectionId() {
+        return binding && binding.connectionId ? binding.connectionId : "plane-" + board.selectedWorkspaceId
+    }
+
+    function refresh() {
+        binding = board.selectedWorkspaceId ? Database.getWorkspaceProvider(board.selectedWorkspaceId) : null
+        const config = binding && binding.config ? binding.config : ({})
+        planeBaseUrl.text = config.baseUrl || "https://api.plane.so"
+        planeWorkspace.text = config.workspace || ""
+        planeAssigneeId.text = config.assigneeId || ""
+        projects = []
+        stateRows = []
+        message = ""
+        failure = false
+    }
+
+    function rememberBinding() {
+        binding = Database.setWorkspaceProvider({
+            workspaceId: board.selectedWorkspaceId,
+            provider: "plane",
+            connectionId: connectionId(),
+            config: { baseUrl: planeBaseUrl.text.trim(), workspace: planeWorkspace.text.trim(),
+                assigneeId: planeAssigneeId.text.trim() }
+        })
+    }
+
+    function track(requestId, operation) {
+        const next = Object.assign({}, requests)
+        next[requestId] = operation
+        requests = next
+    }
+
+    function connectAndDiscover() {
+        if (!board.selectedWorkspaceId || !planeBaseUrl.text.trim() || !planeWorkspace.text.trim()) {
+            failure = true
+            message = i18n("Enter a Plane API URL and workspace slug.")
+            return
+        }
+        if (planeToken.text.length > 0 && !WorkbenchPlane.PlaneSync.setToken(connectionId(), planeToken.text)) {
+            failure = true
+            message = WorkbenchPlane.PlaneSync.lastError
+            return
+        }
+        rememberBinding()
+        failure = false
+        message = i18n("Checking Plane connection…")
+        track(WorkbenchPlane.PlaneSync.validateConnection(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim()), "validate")
+    }
+
+    function projectIndex(categoryId) {
+        const mappings = Database.listProviderProjectMappings(board.selectedWorkspaceId)
+        for (let mappingIndex = 0; mappingIndex < mappings.length; ++mappingIndex) {
+            if (mappings[mappingIndex].categoryId === categoryId) {
+                for (let projectIndex = 0; projectIndex < projects.length; ++projectIndex) {
+                    if (projects[projectIndex].id === mappings[mappingIndex].remoteProjectId) return projectIndex + 1
+                }
+            }
+        }
+        return 0
+    }
+
+    function saveCategoryMapping(categoryId, projectIndex) {
+        if (projectIndex <= 0 || projectIndex > projects.length) {
+            Database.removeProviderProjectMapping(categoryId)
+            return
+        }
+        const project = projects[projectIndex - 1]
+        Database.saveProviderProjectMapping({
+            workspaceId: board.selectedWorkspaceId, categoryId: categoryId, provider: "plane",
+            remoteProjectId: project.id, remoteProjectName: project.name || project.identifier || project.id
+        })
+        track(WorkbenchPlane.PlaneSync.fetchStates(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), project.id), "states:" + project.id)
+        track(WorkbenchPlane.PlaneSync.fetchMembers(connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim(), project.id), "members:" + project.id)
+    }
+
+    Layout.fillWidth: true
+    spacing: Kirigami.Units.largeSpacing
+
+    Kirigami.Heading {
+        Layout.fillWidth: true
+        level: 3
+        text: i18n("Plane integration")
+    }
+
+    PlasmaComponents.Label {
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        color: Kirigami.Theme.disabledTextColor
+        text: i18n("Plane is optional. This workspace stays usable offline; only mapped categories create and synchronize Plane work items.")
+    }
+
+    PlasmaComponents.TextField {
+        id: planeBaseUrl
+        Layout.fillWidth: true
+        placeholderText: i18n("https://api.plane.so")
+        Accessible.name: i18n("Plane API URL")
+    }
+
+    PlasmaComponents.TextField {
+        id: planeWorkspace
+        Layout.fillWidth: true
+        placeholderText: i18n("Plane workspace slug")
+        Accessible.name: i18n("Plane workspace slug")
+    }
+
+    PlasmaComponents.TextField {
+        id: planeAssigneeId
+        Layout.fillWidth: true
+        placeholderText: i18n("Plane assignee ID for batch pull")
+        Accessible.name: i18n("Plane assignee ID")
+    }
+
+    PlasmaComponents.TextField {
+        id: planeToken
+        Layout.fillWidth: true
+        echoMode: TextInput.Password
+        placeholderText: i18n("Personal access token (saved in KWallet)")
+        Accessible.name: i18n("Plane personal access token")
+    }
+
+    RowLayout {
+        Layout.fillWidth: true
+
+        PlasmaComponents.Button {
+            text: i18n("Connect and discover")
+            enabled: board.selectedWorkspaceId.length > 0
+            onClicked: root.connectAndDiscover()
+        }
+
+        PlasmaComponents.Button {
+            text: i18n("Sync linked tasks")
+            enabled: root.binding && root.binding.provider === "plane"
+            onClicked: root.board.syncPlaneWorkspace()
+        }
+
+        PlasmaComponents.Button {
+            text: i18n("Disconnect Plane")
+            enabled: root.binding && root.binding.provider === "plane"
+            onClicked: {
+                if (!WorkbenchPlane.PlaneSync.clearToken(root.connectionId())) {
+                    root.failure = true
+                    root.message = WorkbenchPlane.PlaneSync.lastError
+                    return
+                }
+                Database.setWorkspaceProvider({ workspaceId: root.board.selectedWorkspaceId, provider: null })
+                root.refresh()
+            }
+        }
+    }
+
+    PlasmaComponents.Label {
+        Layout.fillWidth: true
+        visible: root.message.length > 0
+        wrapMode: Text.Wrap
+        color: root.failure ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.positiveTextColor
+        text: root.message
+    }
+
+    Repeater {
+        model: root.projects.length > 0 ? root.board.categories : []
+
+        delegate: RowLayout {
+            required property var model
+            Layout.fillWidth: true
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: model.name
+                elide: Text.ElideRight
+            }
+
+            PlasmaComponents.ComboBox {
+                id: projectPicker
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 15
+                model: [{ id: "", name: i18n("Local only") }].concat(root.projects)
+                textRole: "name"
+                Component.onCompleted: currentIndex = root.projectIndex(model.id)
+                onActivated: root.saveCategoryMapping(model.id, currentIndex)
+            }
+        }
+    }
+
+    Repeater {
+        model: root.stateRows
+
+        delegate: RowLayout {
+            required property var modelData
+            Layout.fillWidth: true
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                text: modelData.projectName + ": " + modelData.remoteStateName
+                elide: Text.ElideRight
+            }
+
+            PlasmaComponents.ComboBox {
+                id: localStatusPicker
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 11
+                model: ["backlog", "ready", "in_progress", "blocked", "completed"]
+                Component.onCompleted: currentIndex = model.indexOf(modelData.localStatus)
+                onActivated: Database.saveProviderStateMapping({ workspaceId: root.board.selectedWorkspaceId,
+                    provider: "plane", projectId: modelData.projectId, remoteStateId: modelData.remoteStateId,
+                    remoteStateName: modelData.remoteStateName, localStatus: currentValue, isOutbound: outboundState.checked })
+            }
+
+            PlasmaComponents.CheckBox {
+                id: outboundState
+                text: i18n("Use for push")
+                checked: modelData.isOutbound
+                onToggled: Database.saveProviderStateMapping({ workspaceId: root.board.selectedWorkspaceId,
+                    provider: "plane", projectId: modelData.projectId, remoteStateId: modelData.remoteStateId,
+                    remoteStateName: modelData.remoteStateName, localStatus: localStatusPicker.currentValue, isOutbound: checked })
+            }
+        }
+    }
+
+    Connections {
+        target: WorkbenchPlane.PlaneSync
+        function onCompleted(requestId, result) {
+            const operation = root.requests[requestId]
+            if (!operation) return
+            const next = Object.assign({}, root.requests)
+            delete next[requestId]
+            root.requests = next
+            if (!result.ok) {
+                root.failure = true
+                root.message = result.error || i18n("Plane request failed.")
+                return
+            }
+            if (operation === "validate") {
+                root.failure = false
+                root.message = i18n("Connected to Plane. Select projects for this workspace’s categories.")
+                root.track(WorkbenchPlane.PlaneSync.fetchProjects(root.connectionId(), planeBaseUrl.text.trim(), planeWorkspace.text.trim()), "projects")
+            } else if (operation === "projects") {
+                root.projects = result.data || []
+            } else if (operation.indexOf("members:") === 0) {
+                const projectId = operation.slice("members:".length)
+                const members = (result.data || []).map(function(member) {
+                    return { memberId: member.id, memberName: member.display_name || member.name || member.id,
+                        memberEmail: member.email || "", memberPayload: member }
+                })
+                Database.replaceProviderMembers({ workspaceId: root.board.selectedWorkspaceId,
+                    provider: "plane", projectId: projectId, members: members })
+            } else if (operation.indexOf("states:") === 0) {
+                const states = result.data || []
+                const projectId = operation.slice("states:".length)
+                const existing = Database.listProviderStateMappings(root.board.selectedWorkspaceId, "plane", projectId)
+                for (let index = 0; index < states.length; ++index) {
+                    const state = states[index]
+                    const group = String(state.group || "").toLowerCase()
+                    const status = group === "completed" || group === "cancelled" ? "completed"
+                        : group === "started" ? "in_progress" : group === "unstarted" ? "ready" : "backlog"
+                    let outbound = false
+                    for (let mappingIndex = 0; mappingIndex < existing.length; ++mappingIndex) {
+                        outbound = outbound || (existing[mappingIndex].remoteStateId === state.id && existing[mappingIndex].isOutbound)
+                    }
+                    if (!outbound && !existing.some(function(mapping) { return mapping.localStatus === status && mapping.isOutbound })) {
+                        outbound = true
+                    }
+                    Database.saveProviderStateMapping({ workspaceId: root.board.selectedWorkspaceId,
+                        provider: "plane", projectId: projectId, remoteStateId: state.id, remoteStateName: state.name || state.id,
+                        localStatus: status, isOutbound: outbound })
+                }
+                const project = root.projects.filter(function(candidate) { return candidate.id === projectId })[0]
+                const refreshed = Database.listProviderStateMappings(root.board.selectedWorkspaceId, "plane", projectId)
+                root.stateRows = root.stateRows.filter(function(row) { return row.projectId !== projectId }).concat(refreshed.map(function(mapping) {
+                    return { projectId: projectId, projectName: project ? (project.name || project.identifier || projectId) : projectId,
+                        remoteStateId: mapping.remoteStateId, remoteStateName: mapping.remoteStateName,
+                        localStatus: mapping.localStatus, isOutbound: mapping.isOutbound }
+                }))
+                root.message = i18n("Plane project metadata is ready. Review the state mappings before syncing.")
+            }
+        }
+    }
+
+    Component.onCompleted: refresh()
+    onVisibleChanged: if (visible) refresh()
+}

@@ -48,8 +48,21 @@ Item {
             color: Kirigami.Theme.disabledTextColor
         }
 
+        Loader {
+            Layout.fillWidth: true
+            active: root.visible
+            sourceComponent: planeSettingsComponent
+        }
+
         Item {
             Layout.fillHeight: true
+        }
+    }
+
+    Component {
+        id: planeSettingsComponent
+        PlaneSettings {
+            board: root.board
         }
     }
 }

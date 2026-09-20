@@ -24,11 +24,15 @@ FocusScope {
     property bool manualSessionLongConfirmed: false
     property var dailyTimelineReport: null
     property string dailyTimelineDate: ""
+    property var planeLink: null
+    property var planeAssigneeIds: []
+    property string planeSyncMessage: ""
     readonly property bool hasUnsavedChanges: root.task && (
         titleField.text !== root.loadedTitle
         || descriptionField.text !== root.loadedDescription
         || root.selectedCategoryId() !== root.loadedCategoryId
         || statusField.currentValue !== root.loadedStatus
+        || JSON.stringify(root.planeAssigneeIds) !== JSON.stringify(root.planeLink ? root.planeLink.assigneeIds : [])
     )
     readonly property bool hasManualCorrections: root.task && (
         root.task.workSessions.some(function(session) { return session.manually_edited })
@@ -47,6 +51,8 @@ FocusScope {
     function loadTask(id) {
         root.taskId = id
         root.task = Database.getTask(id)
+        root.planeLink = root.task ? Database.getTaskExternalLink(id) : null
+        root.planeAssigneeIds = root.planeLink ? root.planeLink.assigneeIds.slice() : []
         if (!root.task) {
             root.visible = false
             return
@@ -98,17 +104,33 @@ FocusScope {
             status: statusField.currentValue
         })
         root.task = Database.getTask(root.taskId)
+        root.planeLink = Database.getTaskExternalLink(root.taskId)
         root.loadedTitle = root.task.title
         root.loadedDescription = root.task.details
         root.loadedCategoryId = root.task.category_id
         root.loadedStatus = root.task.status
         root.board.reload()
+        root.board.syncPlaneTask(root.taskId, root.planeAssigneeIds)
     }
 
     function refreshTask() {
         root.task = Database.getTask(root.taskId)
+        root.planeLink = root.task ? Database.getTaskExternalLink(root.taskId) : null
         root.board.reload()
         root.refreshDailyTimeline()
+    }
+
+    function planeMembers() {
+        return root.planeLink && root.planeLink.projectId
+            ? Database.listProviderMembers(root.board.selectedWorkspaceId, "plane", root.planeLink.projectId) : []
+    }
+
+    function setPlaneAssignee(memberId, enabled) {
+        const next = root.planeAssigneeIds.slice()
+        const index = next.indexOf(memberId)
+        if (enabled && index === -1) next.push(memberId)
+        if (!enabled && index !== -1) next.splice(index, 1)
+        root.planeAssigneeIds = next
     }
 
     function refreshDailyTimeline() {
@@ -439,6 +461,19 @@ FocusScope {
                     text: root.task ? i18n("Status: %1", statusField.currentValue.replace("_", " ")) : ""
                     color: Kirigami.Theme.disabledTextColor
                 }
+
+                Repeater {
+                    model: root.planeMembers()
+
+                    delegate: PlasmaComponents.CheckBox {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: modelData.memberName || modelData.memberEmail || modelData.memberId
+                        checked: root.planeAssigneeIds.indexOf(modelData.memberId) !== -1
+                        Accessible.name: i18n("Assign Plane task to %1", text)
+                        onToggled: root.setPlaneAssignee(modelData.memberId, checked)
+                    }
+                }
             }
         }
     }
@@ -528,6 +563,72 @@ FocusScope {
                 placeholderText: i18n("Add context, notes, or Markdown")
                 Accessible.name: i18n("Task description")
                 wrapMode: TextEdit.Wrap
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: root.planeLink !== null
+                spacing: Kirigami.Units.smallSpacing
+
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    level: 4
+                    text: i18n("Plane")
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    text: root.planeLink ? i18n("%1 · %2", root.planeLink.remoteKey || i18n("New Plane item"),
+                        root.planeLink.syncState.replace("_", " ")) : ""
+                    color: root.planeLink && (root.planeLink.syncState === "conflict" || root.planeLink.syncState === "error")
+                        ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
+                    wrapMode: Text.Wrap
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    visible: root.planeLink && root.planeLink.syncError
+                    text: root.planeLink ? root.planeLink.syncError : ""
+                    color: Kirigami.Theme.negativeTextColor
+                    wrapMode: Text.Wrap
+                }
+
+                PlasmaComponents.Label {
+                    Layout.fillWidth: true
+                    visible: root.planeSyncMessage.length > 0
+                    text: root.planeSyncMessage
+                    color: Kirigami.Theme.disabledTextColor
+                    wrapMode: Text.Wrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    PlasmaComponents.Button {
+                        text: i18n("Open in Plane")
+                        visible: root.planeLink && root.planeLink.remoteUrl.length > 0
+                        onClicked: Qt.openUrlExternally(root.planeLink.remoteUrl)
+                    }
+
+                    PlasmaComponents.Button {
+                        text: i18n("Refresh from Plane")
+                        enabled: root.planeLink && root.planeLink.remoteId.length > 0 && root.planeLink.syncState === "in_sync"
+                        onClicked: root.board.planeIntegration.refreshTask(root.taskId, root.board.selectedWorkspaceId)
+                    }
+
+                    PlasmaComponents.Button {
+                        text: root.planeLink && root.planeLink.syncState === "conflict"
+                            ? i18n("Push my local changes") : i18n("Retry Plane sync")
+                        enabled: root.planeLink && root.planeLink.syncState !== "in_sync"
+                        onClicked: {
+                            if (root.planeLink.syncState === "conflict") {
+                                planeForcePushConfirmation.open()
+                            } else {
+                                root.board.syncPlaneTask(root.taskId, root.planeLink.assigneeIds)
+                            }
+                        }
+                    }
+                }
             }
 
             RowLayout {
@@ -854,6 +955,20 @@ FocusScope {
     Item {
         id: popupHost
         anchors.fill: parent
+    }
+
+    Controls.Dialog {
+        id: planeForcePushConfirmation
+        parent: popupHost
+        modal: true
+        title: i18n("Overwrite Plane?")
+        standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Yes
+        onAccepted: root.board.forcePushPlaneTask(root.taskId)
+        contentItem: PlasmaComponents.Label {
+            width: Kirigami.Units.gridUnit * 24
+            wrapMode: Text.Wrap
+            text: i18n("This replaces Plane’s managed task fields with your local title, description, status, and assignees.")
+        }
     }
 
     Controls.Dialog {

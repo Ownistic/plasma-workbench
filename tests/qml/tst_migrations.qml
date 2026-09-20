@@ -22,8 +22,8 @@ TestCase {
             Migrations.apply(tx, "2026-01-02T00:00:00.000Z")
 
             const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
-            compare(versions.rows.length, 8)
-            compare(versions.rows.item(7).version, 8)
+            compare(versions.rows.length, 11)
+            compare(versions.rows.item(10).version, 11)
             const categoryColumns = tx.executeSql("PRAGMA table_info(categories)")
             let hasTrashColumn = false
             for (let index = 0; index < categoryColumns.rows.length; index += 1) {
@@ -59,6 +59,11 @@ TestCase {
                 "workspace-4leaflabs")
             compare(tx.executeSql("SELECT workspace_id FROM categories WHERE id = 'personal'").rows.item(0).workspace_id,
                 "workspace-personal")
+            compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_providers'").rows.length, 1)
+            compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_project_mappings'").rows.length, 1)
+            compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_state_mappings'").rows.length, 1)
+            compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_members'").rows.length, 1)
+            compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_task_links'").rows.length, 1)
         })
     }
 }

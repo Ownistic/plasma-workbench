@@ -15,18 +15,22 @@ qt_policy(SET QTP0001 NEW)
 # one self-contained package. CMake writes its runtime artifacts here on build.
 set(WORKBENCH_QML_BUNDLE_DIR "${CMAKE_SOURCE_DIR}/package/contents/ui/time")
 set(WORKBENCH_QML_BUILD_DIR "${CMAKE_BINARY_DIR}/qml/io/github/ownisticapps/workbench/time")
+set(WORKBENCH_PLANE_QML_BUNDLE_DIR "${CMAKE_SOURCE_DIR}/package/contents/ui/plane")
+set(WORKBENCH_PLANE_QML_BUILD_DIR "${CMAKE_BINARY_DIR}/qml/io/github/ownisticapps/workbench/plane")
 set(WORKBENCH_PLASMOID_ARCHIVE "${CMAKE_BINARY_DIR}/plasma-workbench-${PROJECT_VERSION}.plasmoid")
 set(WORKBENCH_PLASMOID_STAGING_DIR "${CMAKE_BINARY_DIR}/plasmoid-staging")
 file(RELATIVE_PATH WORKBENCH_BUILD_DIR_RELATIVE "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
 # Keep the original package ID so an upgrade retains existing widgets and settings.
 set(WORKBENCH_LEGACY_PLASMOID_ID "io.github.ownisticapps.worktodo")
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${WORKBENCH_QML_BUNDLE_DIR}")
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${WORKBENCH_PLANE_QML_BUNDLE_DIR}")
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
     "${WORKBENCH_PLASMOID_ARCHIVE}"
     "${WORKBENCH_PLASMOID_STAGING_DIR}"
 )
 
 add_subdirectory(src/time)
+add_subdirectory(src/plane)
 
 install(DIRECTORY package/
     DESTINATION ${KDE_INSTALL_DATADIR}/plasma/plasmoids/${WORKBENCH_LEGACY_PLASMOID_ID}
@@ -61,6 +65,7 @@ add_custom_target(package-plasmoid
         -P "${CMAKE_SOURCE_DIR}/cmake/PackagePlasmoid.cmake"
     DEPENDS
         workbench_timeplugin
+        workbench_planeplugin
         "${CMAKE_SOURCE_DIR}/cmake/PackagePlasmoid.cmake"
         "${CMAKE_SOURCE_DIR}/LICENSE"
         "${CMAKE_SOURCE_DIR}/LICENSES/LGPL-3.0-or-later.txt"
@@ -75,6 +80,7 @@ add_custom_target(package-plasmoid
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests/time)
+    add_subdirectory(tests/plane)
     add_subdirectory(tests/qml)
     add_subdirectory(tests/e2e)
 

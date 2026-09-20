@@ -34,6 +34,9 @@ add_test(
         ${CMAKE_SOURCE_DIR}/package/contents/ui/CategoryHeader.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/TaskCard.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/TaskDetails.qml
+        ${CMAKE_SOURCE_DIR}/package/contents/ui/PlaneIntegration.qml
+        ${CMAKE_SOURCE_DIR}/package/contents/ui/PlaneSettings.qml
+        ${CMAKE_SOURCE_DIR}/package/contents/ui/SettingsPage.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/ReportsView.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/DailyTimeline.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/YearHeatmap.qml

@@ -75,6 +75,84 @@ TestCase {
         compare(Database.listTasks({ workspaceId: workWorkspace.id }).length, 2)
     }
 
+    function test_providerBindingMappingsAndMemberCacheRemainOptional() {
+        const workspace = Database.listWorkspaces()[0]
+        const category = Database.createCategory({ workspaceId: workspace.id, name: "Plane work", color: "#3daee9" })
+        compare(Database.getWorkspaceProvider(workspace.id), null)
+        assertThrows(function() {
+            Database.saveProviderProjectMapping({ workspaceId: workspace.id, categoryId: category.id,
+                provider: "plane", remoteProjectId: "project-1" })
+        }, "not connected")
+
+        const binding = Database.setWorkspaceProvider({ workspaceId: workspace.id, provider: "plane",
+            connectionId: "4leaflabs", config: { baseUrl: "https://api.plane.so", workspaceSlug: "fourleaf" } })
+        compare(binding.provider, "plane")
+        compare(binding.config.workspaceSlug, "fourleaf")
+        const mapping = Database.saveProviderProjectMapping({ workspaceId: workspace.id, categoryId: category.id,
+            provider: "plane", remoteProjectId: "project-1", remoteProjectName: "Delivery" })
+        compare(mapping.remoteProjectName, "Delivery")
+        compare(Database.listProviderProjectMappings(workspace.id).length, 1)
+        const otherWorkspace = Database.createWorkspace({ name: "Other local workspace" })
+        assertThrows(function() {
+            Database.updateCategory({ id: category.id, workspaceId: otherWorkspace.id })
+        }, "provider-mapped")
+
+        Database.saveProviderStateMapping({ workspaceId: workspace.id, provider: "plane", projectId: "project-1", remoteStateId: "todo",
+            remoteStateName: "Todo", localStatus: "ready", isOutbound: true })
+        Database.saveProviderStateMapping({ workspaceId: workspace.id, provider: "plane", projectId: "project-1", remoteStateId: "triage",
+            remoteStateName: "Triage", localStatus: "ready", isOutbound: true })
+        const stateMappings = Database.listProviderStateMappings(workspace.id, "plane", "project-1")
+        compare(stateMappings.length, 2)
+        compare(stateMappings.filter(function(mapping) { return mapping.localStatus === "ready" && mapping.isOutbound }).length, 1)
+        compare(stateMappings.filter(function(mapping) { return mapping.isOutbound })[0].remoteStateId, "triage")
+
+        Database.replaceProviderMembers({ workspaceId: workspace.id, provider: "plane", projectId: "project-1", members: [
+            { memberId: "member-1", memberName: "Ari", memberEmail: "ari@example.test", memberPayload: { active: true } }
+        ] })
+        const members = Database.listProviderMembers(workspace.id, "plane", "project-1")
+        compare(members.length, 1)
+        compare(members[0].memberName, "Ari")
+        compare(JSON.parse(members[0].memberPayloadJson).active, true)
+
+        Database.setWorkspaceProvider({ workspaceId: workspace.id, provider: null })
+        compare(Database.getWorkspaceProvider(workspace.id), null)
+        compare(Database.listCategories(workspace.id)[0].id, category.id)
+    }
+
+    function test_providerTaskLinksSupportPendingCreationConflictAndLegacyFields() {
+        const category = createCategory("Provider work")
+        const otherCategory = createCategory("Other provider work")
+        const workspace = Database.listWorkspaces()[0]
+        Database.setWorkspaceProvider({ workspaceId: workspace.id, provider: "plane" })
+        Database.saveProviderProjectMapping({ workspaceId: workspace.id, categoryId: category.id,
+            provider: "plane", remoteProjectId: "project-1" })
+        Database.saveProviderProjectMapping({ workspaceId: workspace.id, categoryId: otherCategory.id,
+            provider: "plane", remoteProjectId: "project-2" })
+        const task = createTask(category.id, "Create from local work")
+        const pending = Database.updateTaskExternalLink({ taskId: task.id, provider: "plane", projectId: "project-1",
+            assigneeIds: ["member-1", "member-2"], managedBaseline: { title: task.title }, syncState: "pending_create" })
+        compare(pending.remoteId, null)
+        compare(pending.syncState, "pending_create")
+        compare(pending.assigneeIds.length, 2)
+        compare(pending.managedBaseline.title, task.title)
+
+        const synced = Database.updateTaskExternalLink({ taskId: task.id, remoteId: "issue-1", remoteKey: "FOUR-1",
+            remoteUrl: "https://app.plane.so/fourleaf/browse/FOUR-1", remoteUpdatedAt: "2026-09-19T10:00:00.000Z",
+            remoteRevision: "rev-1", lastSyncedAt: "2026-09-19T10:00:00.000Z", syncState: "in_sync" })
+        compare(synced.remoteId, "issue-1")
+        compare(synced.remoteKey, "FOUR-1")
+        compare(synced.syncState, "in_sync")
+
+        const conflicted = Database.markPending(task.id, "conflict", "Changed remotely")
+        compare(conflicted.syncState, "conflict")
+        compare(conflicted.syncError, "Changed remotely")
+        compare(Database.getTaskExternalLink(task.id).remoteRevision, "rev-1")
+        assertThrows(function() { Database.markPending(task.id, "in_sync") }, "Only pending")
+        assertThrows(function() {
+            Database.moveTask({ taskId: task.id, targetCategoryId: otherCategory.id })
+        }, "different remote project")
+    }
+
     function test_taskCreationAndFiltering() {
         const category = createCategory("Product")
         const ready = createTask(category.id, "Ship first version", "ready")

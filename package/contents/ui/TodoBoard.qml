@@ -15,6 +15,7 @@ Item {
     required property var plasmoidConfiguration
     required property var plasmoidRoot
     property alias workspaces: workspaceModel
+    property alias planeIntegration: planeIntegration
     property var selectedStatuses: []
     property alias categories: categoryModel
     property string selectedWorkspaceId: ""
@@ -408,8 +409,61 @@ Item {
         return false
     }
 
+    function taskForId(taskId) {
+        for (let index = 0; index < taskModel.count; index += 1) {
+            const task = taskModel.get(index)
+            if (task.taskId === taskId) {
+                return task
+            }
+        }
+        return null
+    }
+
+    function categoryWorkspaceId(categoryId) {
+        const workspaces = Database.listWorkspaces()
+        for (let workspaceIndex = 0; workspaceIndex < workspaces.length; workspaceIndex += 1) {
+            const categories = Database.listCategories(workspaces[workspaceIndex].id)
+            for (let categoryIndex = 0; categoryIndex < categories.length; categoryIndex += 1) {
+                if (categories[categoryIndex].id === categoryId) {
+                    return workspaces[workspaceIndex].id
+                }
+            }
+        }
+        return ""
+    }
+
+    function canMoveTaskToCategory(task, targetCategoryId) {
+        if (!task || task.categoryId === targetCategoryId) {
+            return true
+        }
+        const link = Database.getTaskExternalLink(task.taskId)
+        if (!link || link.provider !== "plane") {
+            return true
+        }
+        const targetWorkspaceId = categoryWorkspaceId(targetCategoryId)
+        if (targetWorkspaceId !== task.workspaceId) {
+            root.moveError = i18n("Plane-linked tasks cannot be moved out of their workspace.")
+            moveErrorTimer.restart()
+            return false
+        }
+        const mappings = Database.listProviderProjectMappings(task.workspaceId)
+        for (let index = 0; index < mappings.length; index += 1) {
+            const mapping = mappings[index]
+            if (mapping.provider === "plane" && mapping.categoryId === targetCategoryId
+                    && mapping.remoteProjectId === link.projectId) {
+                return true
+            }
+        }
+        root.moveError = i18n("Plane-linked tasks cannot be moved to a different Plane project.")
+        moveErrorTimer.restart()
+        return false
+    }
+
     function moveTask(task, targetTask, placement) {
         if (!targetTask) {
+            return
+        }
+        if (!canMoveTaskToCategory(task, targetTask.categoryId)) {
             return
         }
         try {
@@ -429,6 +483,9 @@ Item {
     }
 
     function moveTaskById(taskId, targetTaskId, targetCategoryId, placement) {
+        if (!canMoveTaskToCategory(taskForId(taskId), targetCategoryId)) {
+            return
+        }
         try {
             Database.moveTask({
                 taskId: taskId,
@@ -485,6 +542,9 @@ Item {
 
     function commitTaskDrop(sourceTaskId, targetTaskId, targetCategoryId, placement) {
         root.taskDropHandled = true
+        if (!canMoveTaskToCategory(taskForId(sourceTaskId), targetCategoryId)) {
+            return
+        }
         try {
             Database.moveTask({
                 taskId: sourceTaskId,
@@ -607,6 +667,26 @@ Item {
         if (detailsDialog.task) {
             root.currentPage = "details"
         }
+    }
+
+    function syncPlaneTask(taskId, assigneeIds) {
+        planeIntegration.queueTask(taskId, root.selectedWorkspaceId, assigneeIds)
+    }
+
+    function forcePushPlaneTask(taskId) {
+        planeIntegration.forcePush(taskId, root.selectedWorkspaceId)
+    }
+
+    function syncPlaneWorkspace() {
+        planeIntegration.syncWorkspace(root.selectedWorkspaceId)
+    }
+
+    function planeProjectForCategory(categoryId) {
+        const mappings = Database.listProviderProjectMappings(root.selectedWorkspaceId)
+        for (let index = 0; index < mappings.length; ++index) {
+            if (mappings[index].provider === "plane" && mappings[index].categoryId === categoryId) return mappings[index].remoteProjectId
+        }
+        return ""
     }
 
     function closeTaskDetails() {
@@ -1458,6 +1538,7 @@ Item {
         objectName: "create-task-dialog"
         parent: root
         modal: true
+        property var taskAssigneeIds: []
         title: i18n("Create task")
         standardButtons: Controls.Dialog.Cancel | Controls.Dialog.Save
         width: Math.min(root.width - Kirigami.Units.largeSpacing * 2, Kirigami.Units.gridUnit * 24)
@@ -1469,19 +1550,21 @@ Item {
             taskDescription.text = ""
             taskStatus.currentIndex = 0
             taskCategory.currentIndex = 0
+            taskAssigneeIds = []
             taskTitle.forceActiveFocus()
         }
         onAccepted: {
             if (categoryModel.count === 0) {
                 return
             }
-            Database.createTask({
+            const createdTask = Database.createTask({
                 title: taskTitle.text,
                 details: taskDescription.text,
                 status: taskStatus.currentValue,
                 categoryId: categoryModel.get(taskCategory.currentIndex).id
             })
             root.reload()
+            root.syncPlaneTask(createdTask.id, taskAssigneeIds)
         }
 
         contentItem: ColumnLayout {
@@ -1502,6 +1585,25 @@ Item {
                 model: categoryModel
                 textRole: "name"
                 Accessible.name: i18n("Task category")
+            }
+
+            Repeater {
+                model: taskCategory.currentIndex >= 0 && taskCategory.currentIndex < categoryModel.count
+                    ? Database.listProviderMembers(root.selectedWorkspaceId, "plane", root.planeProjectForCategory(categoryModel.get(taskCategory.currentIndex).id)) : []
+
+                delegate: PlasmaComponents.CheckBox {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    text: modelData.memberName || modelData.memberEmail || modelData.memberId
+                    checked: taskAssigneeIds.indexOf(modelData.memberId) !== -1
+                    onToggled: {
+                        const next = taskAssigneeIds.slice()
+                        const index = next.indexOf(modelData.memberId)
+                        if (checked && index === -1) next.push(modelData.memberId)
+                        if (!checked && index !== -1) next.splice(index, 1)
+                        taskAssigneeIds = next
+                    }
+                }
             }
 
             PlasmaComponents.ComboBox {
@@ -1860,6 +1962,18 @@ Item {
     TaskDetails {
         id: detailsDialog
         board: root
+    }
+
+    PlaneIntegration {
+        id: planeIntegration
+        board: root
+        onSyncFinished: function(taskId, ok, message) {
+            root.reload()
+            if (detailsDialog.taskId === taskId) {
+                detailsDialog.loadTask(taskId)
+                detailsDialog.planeSyncMessage = ok ? i18n("Synced with Plane.") : message
+            }
+        }
     }
 
 }

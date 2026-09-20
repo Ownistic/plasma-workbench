@@ -1,6 +1,7 @@
 /build/
 *.plasmoid
 /package/contents/ui/time/
+/package/contents/ui/plane/
 /.cortexkit/
 __pycache__/
 *.py[cod]

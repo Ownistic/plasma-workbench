@@ -89,6 +89,56 @@ function requireStatus(status) {
     return status
 }
 
+function requireProvider(value) {
+    return normalizedText(value, "Provider", 64)
+}
+
+function requireSyncState(value) {
+    const states = ["in_sync", "pending_create", "pending_push", "conflict", "error"]
+    if (states.indexOf(value) === -1) {
+        fail("The provider sync state is invalid.")
+    }
+    return value
+}
+
+function jsonText(value, fieldName, fallback) {
+    if (value === undefined) {
+        return fallback
+    }
+    if (typeof value === "string") {
+        try {
+            JSON.parse(value)
+        } catch (error) {
+            fail(fieldName + " must be valid JSON.")
+        }
+        return value
+    }
+    try {
+        const serialized = JSON.stringify(value)
+        if (serialized === undefined) {
+            fail(fieldName + " must be JSON-compatible.")
+        }
+        return serialized
+    } catch (error) {
+        fail(fieldName + " must be JSON-compatible.")
+    }
+}
+
+function parsedJson(value, fallback) {
+    try {
+        return JSON.parse(value)
+    } catch (error) {
+        return fallback
+    }
+}
+
+function nullableText(value, fieldName, maximumLength) {
+    if (value === null) {
+        return null
+    }
+    return normalizedText(value, fieldName, maximumLength)
+}
+
 function open() {
     if (!database) {
         database = Sql.LocalStorage.openDatabaseSync(
@@ -196,6 +246,8 @@ function purgeExpiredTrashInTransaction(tx, currentUtc) {
         return 0
     }
     const categoryClause = "category_id IN (SELECT id FROM categories WHERE trashed_at_utc IS NOT NULL AND trashed_at_utc <= ?)"
+    tx.executeSql("DELETE FROM provider_task_links WHERE task_id IN (SELECT id FROM tasks WHERE " + categoryClause + ")", [cutoffUtc])
+    tx.executeSql("DELETE FROM external_tasks WHERE task_id IN (SELECT id FROM tasks WHERE " + categoryClause + ")", [cutoffUtc])
     tx.executeSql("DELETE FROM work_sessions WHERE task_id IN (SELECT id FROM tasks WHERE " + categoryClause + ")", [cutoffUtc])
     tx.executeSql("DELETE FROM status_events WHERE task_id IN (SELECT id FROM tasks WHERE " + categoryClause + ")", [cutoffUtc])
     tx.executeSql("DELETE FROM tasks WHERE " + categoryClause, [cutoffUtc])
@@ -209,6 +261,29 @@ function taskById(tx, taskId) {
         fail("The task does not exist.")
     }
     return task
+}
+
+function assertTaskMoveProviderCompatible(tx, task, targetCategoryId) {
+    if (task.category_id === targetCategoryId) {
+        return
+    }
+    const link = first(tx.executeSql("SELECT provider, project_id FROM provider_task_links WHERE task_id = ?", [task.id]))
+        || first(tx.executeSql("SELECT provider, project_id FROM external_tasks WHERE task_id = ?", [task.id]))
+    if (!link) {
+        return
+    }
+    const sourceCategory = activeCategoryById(tx, task.category_id)
+    const targetCategory = activeCategoryById(tx, targetCategoryId)
+    if (sourceCategory.workspace_id !== targetCategory.workspace_id) {
+        fail("A provider-linked task cannot move out of its workspace.")
+    }
+    const mapping = first(tx.executeSql(
+        "SELECT remote_project_id FROM provider_project_mappings WHERE category_id = ? AND provider = ?",
+        [targetCategoryId, link.provider]
+    ))
+    if (!mapping || mapping.remote_project_id !== link.project_id) {
+        fail("A provider-linked task cannot move to a different remote project.")
+    }
 }
 
 function activeSessions(tx) {
@@ -445,6 +520,180 @@ function createWorkspace(input) {
     })
 }
 
+function workspaceProviderRecord(row) {
+    if (!row) {
+        return null
+    }
+    return {
+        workspaceId: row.workspace_id,
+        provider: row.provider,
+        connectionId: row.connection_id,
+        config: parsedJson(row.config_json, {}),
+        configJson: row.config_json,
+        createdAtUtc: row.created_at_utc,
+        updatedAtUtc: row.updated_at_utc
+    }
+}
+
+function getWorkspaceProvider(workspaceId) {
+    workspaceId = requireId(workspaceId, "Workspace ID")
+    return read(function(tx) {
+        workspaceById(tx, workspaceId)
+        return workspaceProviderRecord(first(tx.executeSql(
+            "SELECT * FROM workspace_providers WHERE workspace_id = ?", [workspaceId]
+        )))
+    })
+}
+
+// Pass provider: null to remove the optional integration and retain all local data.
+function setWorkspaceProvider(input) {
+    input = input || {}
+    const workspaceId = requireId(input.workspaceId, "Workspace ID")
+    if (input.provider === null) {
+        return write(function(tx) {
+            workspaceById(tx, workspaceId)
+            tx.executeSql("DELETE FROM workspace_providers WHERE workspace_id = ?", [workspaceId])
+            return null
+        })
+    }
+    const provider = requireProvider(input.provider)
+    const connectionId = input.connectionId === undefined || input.connectionId === null
+        ? null : normalizedText(input.connectionId, "Connection ID", 200)
+    const configJson = jsonText(input.config !== undefined ? input.config : input.configJson, "Provider configuration", "{}")
+    return write(function(tx) {
+        workspaceById(tx, workspaceId)
+        const timestamp = nowUtc()
+        tx.executeSql(
+            "INSERT INTO workspace_providers (workspace_id, provider, connection_id, config_json, created_at_utc, updated_at_utc) " +
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET provider = excluded.provider, " +
+            "connection_id = excluded.connection_id, config_json = excluded.config_json, updated_at_utc = excluded.updated_at_utc",
+            [workspaceId, provider, connectionId, configJson, timestamp, timestamp]
+        )
+        return workspaceProviderRecord(first(tx.executeSql("SELECT * FROM workspace_providers WHERE workspace_id = ?", [workspaceId])))
+    })
+}
+
+function providerProjectMappingRecord(row) {
+    return {
+        categoryId: row.category_id, workspaceId: row.workspace_id, provider: row.provider,
+        remoteProjectId: row.remote_project_id, remoteProjectName: row.remote_project_name,
+        createdAtUtc: row.created_at_utc, updatedAtUtc: row.updated_at_utc
+    }
+}
+
+function listProviderProjectMappings(workspaceId) {
+    workspaceId = requireId(workspaceId, "Workspace ID")
+    return read(function(tx) {
+        workspaceById(tx, workspaceId)
+        return rows(tx.executeSql(
+            "SELECT * FROM provider_project_mappings WHERE workspace_id = ? ORDER BY remote_project_name, remote_project_id",
+            [workspaceId]
+        )).map(providerProjectMappingRecord)
+    })
+}
+
+function saveProviderProjectMapping(input) {
+    input = input || {}
+    const workspaceId = requireId(input.workspaceId, "Workspace ID")
+    const categoryId = requireId(input.categoryId, "Category ID")
+    const provider = requireProvider(input.provider)
+    const remoteProjectId = normalizedText(input.remoteProjectId, "Remote project ID", 200)
+    const remoteProjectName = input.remoteProjectName === undefined ? "" : String(input.remoteProjectName)
+    return write(function(tx) {
+        const category = activeCategoryById(tx, categoryId)
+        workspaceById(tx, workspaceId)
+        if (category.workspace_id !== workspaceId) {
+            fail("The category does not belong to the workspace.")
+        }
+        const binding = first(tx.executeSql("SELECT provider FROM workspace_providers WHERE workspace_id = ?", [workspaceId]))
+        if (!binding || binding.provider !== provider) {
+            fail("The workspace is not connected to this provider.")
+        }
+        const timestamp = nowUtc()
+        tx.executeSql(
+            "INSERT INTO provider_project_mappings (category_id, workspace_id, provider, remote_project_id, remote_project_name, created_at_utc, updated_at_utc) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(category_id) DO UPDATE SET workspace_id = excluded.workspace_id, " +
+            "provider = excluded.provider, remote_project_id = excluded.remote_project_id, remote_project_name = excluded.remote_project_name, updated_at_utc = excluded.updated_at_utc",
+            [categoryId, workspaceId, provider, remoteProjectId, remoteProjectName, timestamp, timestamp]
+        )
+        return providerProjectMappingRecord(first(tx.executeSql("SELECT * FROM provider_project_mappings WHERE category_id = ?", [categoryId])))
+    })
+}
+
+function removeProviderProjectMapping(categoryId) {
+    categoryId = requireId(categoryId, "Category ID")
+    return write(function(tx) { tx.executeSql("DELETE FROM provider_project_mappings WHERE category_id = ?", [categoryId]) })
+}
+
+function providerStateMappingRecord(row) {
+    return { workspaceId: row.workspace_id, provider: row.provider, projectId: row.project_id, remoteStateId: row.remote_state_id,
+        remoteStateName: row.remote_state_name, localStatus: row.local_status, isOutbound: row.is_outbound === 1,
+        createdAtUtc: row.created_at_utc, updatedAtUtc: row.updated_at_utc }
+}
+
+function listProviderStateMappings(workspaceId, provider, projectId) {
+    workspaceId = requireId(workspaceId, "Workspace ID")
+    provider = requireProvider(provider)
+    projectId = requireId(projectId, "Project ID")
+    return read(function(tx) {
+        return rows(tx.executeSql("SELECT * FROM provider_state_mappings WHERE workspace_id = ? AND provider = ? AND project_id = ? ORDER BY remote_state_name, remote_state_id", [workspaceId, provider, projectId])).map(providerStateMappingRecord)
+    })
+}
+
+function saveProviderStateMapping(input) {
+    input = input || {}
+    const workspaceId = requireId(input.workspaceId, "Workspace ID")
+    const provider = requireProvider(input.provider)
+    const projectId = requireId(input.projectId, "Project ID")
+    const remoteStateId = normalizedText(input.remoteStateId, "Remote state ID", 200)
+    const localStatus = requireStatus(input.localStatus)
+    const isOutbound = input.isOutbound === true ? 1 : 0
+    const remoteStateName = input.remoteStateName === undefined ? "" : String(input.remoteStateName)
+    return write(function(tx) {
+        workspaceById(tx, workspaceId)
+        const timestamp = nowUtc()
+        if (isOutbound) {
+            tx.executeSql("UPDATE provider_state_mappings SET is_outbound = 0, updated_at_utc = ? WHERE workspace_id = ? AND provider = ? AND project_id = ? AND local_status = ?", [timestamp, workspaceId, provider, projectId, localStatus])
+        }
+        tx.executeSql("INSERT INTO provider_state_mappings (workspace_id, provider, project_id, remote_state_id, local_status, is_outbound, remote_state_name, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, provider, project_id, remote_state_id) DO UPDATE SET local_status = excluded.local_status, is_outbound = excluded.is_outbound, remote_state_name = excluded.remote_state_name, updated_at_utc = excluded.updated_at_utc", [workspaceId, provider, projectId, remoteStateId, localStatus, isOutbound, remoteStateName, timestamp, timestamp])
+        return providerStateMappingRecord(first(tx.executeSql("SELECT * FROM provider_state_mappings WHERE workspace_id = ? AND provider = ? AND project_id = ? AND remote_state_id = ?", [workspaceId, provider, projectId, remoteStateId])))
+    })
+}
+
+function listProviderMembers(workspaceId, provider, projectId) {
+    workspaceId = requireId(workspaceId, "Workspace ID")
+    provider = requireProvider(provider)
+    projectId = requireId(projectId, "Project ID")
+    return read(function(tx) {
+        return rows(tx.executeSql("SELECT workspace_id AS workspaceId, provider, project_id AS projectId, member_id AS memberId, member_name AS memberName, member_email AS memberEmail, member_payload_json AS memberPayloadJson, updated_at_utc AS updatedAtUtc FROM provider_members WHERE workspace_id = ? AND provider = ? AND project_id = ? ORDER BY member_name, member_id", [workspaceId, provider, projectId]))
+    })
+}
+
+function replaceProviderMembers(input) {
+    input = input || {}
+    const workspaceId = requireId(input.workspaceId, "Workspace ID")
+    const provider = requireProvider(input.provider)
+    const projectId = requireId(input.projectId, "Project ID")
+    const members = input.members || []
+    if (!Array.isArray(members)) {
+        fail("Provider members must be an array.")
+    }
+    return write(function(tx) {
+        workspaceById(tx, workspaceId)
+        const timestamp = nowUtc()
+        tx.executeSql("DELETE FROM provider_members WHERE workspace_id = ? AND provider = ? AND project_id = ?", [workspaceId, provider, projectId])
+        for (let index = 0; index < members.length; index += 1) {
+            const member = members[index] || {}
+            tx.executeSql("INSERT INTO provider_members (workspace_id, provider, project_id, member_id, member_name, member_email, member_payload_json, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [workspaceId, provider, projectId, requireId(member.memberId, "Member ID"), member.memberName || "", member.memberEmail || "", jsonText(member.memberPayload !== undefined ? member.memberPayload : member.memberPayloadJson, "Member payload", "{}"), timestamp])
+        }
+        return listProviderMembersInTransaction(tx, workspaceId, provider, projectId)
+    })
+}
+
+function listProviderMembersInTransaction(tx, workspaceId, provider, projectId) {
+    return rows(tx.executeSql("SELECT workspace_id AS workspaceId, provider, project_id AS projectId, member_id AS memberId, member_name AS memberName, member_email AS memberEmail, member_payload_json AS memberPayloadJson, updated_at_utc AS updatedAtUtc FROM provider_members WHERE workspace_id = ? AND provider = ? AND project_id = ? ORDER BY member_name, member_id", [workspaceId, provider, projectId]))
+}
+
 function listCategories(workspaceId) {
     purgeExpiredTrash()
     return read(function(tx) {
@@ -572,6 +821,11 @@ function updateCategory(input) {
         const workspace = input.workspaceId === undefined
             ? workspaceById(tx, current.workspace_id)
             : workspaceById(tx, requireId(input.workspaceId, "Workspace ID"))
+        if (workspace.id !== current.workspace_id && first(tx.executeSql(
+            "SELECT 1 FROM provider_project_mappings WHERE category_id = ?", [categoryId]
+        ))) {
+            fail("A provider-mapped category cannot move to a different workspace.")
+        }
         const position = workspace.id === current.workspace_id ? current.position
             : nextPosition(tx, "categories", "WHERE workspace_id = ? AND trashed_at_utc IS NULL", [workspace.id])
         const timestamp = nowUtc()
@@ -711,6 +965,111 @@ function getTask(taskId) {
     })
 }
 
+function taskExternalLinkRecord(row) {
+    if (!row) {
+        return null
+    }
+    return {
+        taskId: row.task_id, provider: row.provider, remoteId: row.remote_id, remoteKey: row.remote_key,
+        remoteUrl: row.remote_url, projectId: row.project_id, remoteUpdatedAt: row.remote_updated_at,
+        remoteRevision: row.remote_revision, lastLocalUpdatedAt: row.last_local_updated_at,
+        lastSyncedAt: row.last_synced_at, syncState: row.sync_state, syncError: row.sync_error,
+        assigneeIds: parsedJson(row.assignee_ids_json, []), assigneeIdsJson: row.assignee_ids_json,
+        managedBaseline: parsedJson(row.managed_baseline_json, {}), managedBaselineJson: row.managed_baseline_json,
+        remotePayload: parsedJson(row.remote_payload_json, {}), remotePayloadJson: row.remote_payload_json,
+        createdAtUtc: row.created_at_utc, updatedAtUtc: row.updated_at_utc
+    }
+}
+
+function getTaskExternalLink(taskId) {
+    taskId = requireId(taskId, "Task ID")
+    return read(function(tx) {
+        taskById(tx, taskId)
+        let link = first(tx.executeSql("SELECT * FROM provider_task_links WHERE task_id = ?", [taskId]))
+        if (link) {
+            return taskExternalLinkRecord(link)
+        }
+        // Compatibility for databases changed by the legacy CLI after this migration.
+        const legacy = first(tx.executeSql("SELECT * FROM external_tasks WHERE task_id = ?", [taskId]))
+        if (!legacy) {
+            return null
+        }
+        return taskExternalLinkRecord({
+            task_id: legacy.task_id, provider: legacy.provider, remote_id: legacy.remote_id,
+            remote_key: legacy.remote_key, remote_url: legacy.remote_url, project_id: legacy.project_id,
+            remote_updated_at: legacy.remote_updated_at, remote_revision: null,
+            last_local_updated_at: legacy.last_local_updated_at, last_synced_at: legacy.last_synced_at,
+            sync_state: legacy.sync_state, sync_error: null, assignee_ids_json: "[]",
+            managed_baseline_json: "{}", remote_payload_json: legacy.remote_payload_json,
+            created_at_utc: legacy.last_synced_at, updated_at_utc: legacy.last_synced_at
+        })
+    })
+}
+
+function listProviderTaskLinks(workspaceId, provider) {
+    workspaceId = requireId(workspaceId, "Workspace ID")
+    provider = requireProvider(provider)
+    return read(function(tx) {
+        workspaceById(tx, workspaceId)
+        return rows(tx.executeSql(
+            "SELECT provider_task_links.* FROM provider_task_links " +
+            "JOIN tasks ON tasks.id = provider_task_links.task_id " +
+            "JOIN categories ON categories.id = tasks.category_id " +
+            "WHERE categories.workspace_id = ? AND provider_task_links.provider = ? " +
+            "ORDER BY provider_task_links.task_id",
+            [workspaceId, provider]
+        )).map(taskExternalLinkRecord)
+    })
+}
+
+function updateTaskExternalLink(input) {
+    input = input || {}
+    const taskId = requireId(input.taskId, "Task ID")
+    return write(function(tx) {
+        const task = taskById(tx, taskId)
+        const existing = first(tx.executeSql("SELECT * FROM provider_task_links WHERE task_id = ?", [taskId]))
+        const provider = input.provider === undefined
+            ? (existing ? existing.provider : fail("Provider is required.")) : requireProvider(input.provider)
+        const remoteId = input.remoteId === undefined ? (existing ? existing.remote_id : null)
+            : (input.remoteId === null ? null : normalizedText(input.remoteId, "Remote ID", 200))
+        const remoteKey = input.remoteKey === undefined ? (existing ? existing.remote_key : "") : String(input.remoteKey || "")
+        const remoteUrl = input.remoteUrl === undefined ? (existing ? existing.remote_url : "") : String(input.remoteUrl || "")
+        const projectId = input.projectId === undefined ? (existing ? existing.project_id : null)
+            : (input.projectId === null ? null : normalizedText(input.projectId, "Remote project ID", 200))
+        const remoteUpdatedAt = input.remoteUpdatedAt === undefined ? (existing ? existing.remote_updated_at : null)
+            : (input.remoteUpdatedAt === null ? null : requireUtcInstant(input.remoteUpdatedAt, "Remote update time"))
+        const remoteRevision = input.remoteRevision === undefined ? (existing ? existing.remote_revision : null)
+            : (input.remoteRevision === null ? null : normalizedText(input.remoteRevision, "Remote revision", 200))
+        const lastSyncedAt = input.lastSyncedAt === undefined ? (existing ? existing.last_synced_at : null)
+            : (input.lastSyncedAt === null ? null : requireUtcInstant(input.lastSyncedAt, "Last sync time"))
+        const syncState = input.syncState === undefined ? (existing ? existing.sync_state : (remoteId ? "in_sync" : "pending_create")) : requireSyncState(input.syncState)
+        const syncError = input.syncError === undefined ? (existing ? existing.sync_error : null)
+            : (input.syncError === null ? null : normalizedText(input.syncError, "Sync error", 2000))
+        const assigneeIdsJson = jsonText(input.assigneeIds !== undefined ? input.assigneeIds : input.assigneeIdsJson, "Assignee IDs", existing ? existing.assignee_ids_json : "[]")
+        const managedBaselineJson = jsonText(input.managedBaseline !== undefined ? input.managedBaseline : input.managedBaselineJson, "Managed baseline", existing ? existing.managed_baseline_json : "{}")
+        const remotePayloadJson = jsonText(input.remotePayload !== undefined ? input.remotePayload : input.remotePayloadJson, "Remote payload", existing ? existing.remote_payload_json : "{}")
+        const timestamp = nowUtc()
+        tx.executeSql(
+            "INSERT INTO provider_task_links (task_id, provider, remote_id, remote_key, remote_url, project_id, remote_updated_at, remote_revision, last_local_updated_at, last_synced_at, sync_state, sync_error, assignee_ids_json, managed_baseline_json, remote_payload_json, created_at_utc, updated_at_utc) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO UPDATE SET provider = excluded.provider, remote_id = excluded.remote_id, remote_key = excluded.remote_key, remote_url = excluded.remote_url, project_id = excluded.project_id, remote_updated_at = excluded.remote_updated_at, remote_revision = excluded.remote_revision, last_local_updated_at = excluded.last_local_updated_at, last_synced_at = excluded.last_synced_at, sync_state = excluded.sync_state, sync_error = excluded.sync_error, assignee_ids_json = excluded.assignee_ids_json, managed_baseline_json = excluded.managed_baseline_json, remote_payload_json = excluded.remote_payload_json, updated_at_utc = excluded.updated_at_utc",
+            [taskId, provider, remoteId, remoteKey, remoteUrl, projectId, remoteUpdatedAt, remoteRevision,
+             task.updated_at_utc, lastSyncedAt, syncState, syncError, assigneeIdsJson, managedBaselineJson,
+             remotePayloadJson, timestamp, timestamp]
+        )
+        return taskExternalLinkRecord(first(tx.executeSql("SELECT * FROM provider_task_links WHERE task_id = ?", [taskId])))
+    })
+}
+
+function markPending(taskId, syncState, syncError) {
+    taskId = requireId(taskId, "Task ID")
+    syncState = requireSyncState(syncState)
+    if (["pending_create", "pending_push", "error", "conflict"].indexOf(syncState) === -1) {
+        fail("Only pending, error, or conflict states can be marked manually.")
+    }
+    return updateTaskExternalLink({ taskId: taskId, syncState: syncState,
+        syncError: syncError === undefined ? null : syncError })
+}
+
 function createTask(input) {
     input = input || {}
     const categoryId = requireId(input.categoryId, "Category ID")
@@ -776,6 +1135,7 @@ function saveTask(input) {
         const timestamp = nowUtc()
         let position = task.position
         if (task.category_id !== categoryId) {
+            assertTaskMoveProviderCompatible(tx, task, categoryId)
             position = positionForMove(tx, categoryId, taskId, null, "before")
         }
         tx.executeSql(
@@ -810,6 +1170,7 @@ function moveTask(input) {
         if (targetTaskId === taskId) {
             return task.position
         }
+        assertTaskMoveProviderCompatible(tx, task, targetCategoryId)
         const position = positionForMove(tx, targetCategoryId, taskId, targetTaskId, placement)
         tx.executeSql(
             "UPDATE tasks SET category_id = ?, position = ?, updated_at_utc = ? WHERE id = ?",
@@ -833,6 +1194,8 @@ function deleteTask(taskId) {
     taskId = requireId(taskId, "Task ID")
     return write(function(tx) {
         taskById(tx, taskId)
+        tx.executeSql("DELETE FROM provider_task_links WHERE task_id = ?", [taskId])
+        tx.executeSql("DELETE FROM external_tasks WHERE task_id = ?", [taskId])
         tx.executeSql("DELETE FROM work_sessions WHERE task_id = ?", [taskId])
         tx.executeSql("DELETE FROM status_events WHERE task_id = ?", [taskId])
         tx.executeSql("DELETE FROM tasks WHERE id = ?", [taskId])

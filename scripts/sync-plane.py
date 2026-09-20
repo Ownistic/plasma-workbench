@@ -124,20 +124,12 @@ def fetch_plane_items(base_url: str, api_key: str, workspace: str, assignee: str
                 status = "blocked" if "block" in str(state.get("name", "")).lower() else PLANE_STATUS_MAP.get(group, "backlog")
                 key = f"{project['identifier']}-{item['sequence_id']}"
                 url = f"https://app.plane.so/{workspace}/browse/{key}/"
-                details = []
                 description = str(item.get("description_stripped") or "").strip()
-                if description:
-                    details.extend((description, ""))
-                details.append(f"Plane project: {project['name']}")
-                details.append(f"Priority: {str(item.get('priority') or 'none').title()}")
-                if item.get("target_date"):
-                    details.append(f"Target date: {item['target_date']}")
-                details.append(url)
                 normalized.append({
                     "id": str(item["id"]),
                     "key": key,
-                    "title": f"[{key}] {item['name']}",
-                    "details": "\n".join(details),
+                    "title": str(item["name"]),
+                    "details": description,
                     "status": status,
                     "url": url,
                     "project_id": project_id,
@@ -172,9 +164,23 @@ def next_position(connection: sqlite3.Connection, category: str) -> int:
     return int(row[0])
 
 
+def link_table(connection: sqlite3.Connection) -> str:
+    """Use the provider-neutral links after the in-plasmoid migration.
+
+    Older installed databases retain external_tasks until Workbench opens them,
+    so the CLI remains backwards compatible without maintaining two sources of
+    truth in upgraded databases.
+    """
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'provider_task_links'"
+    ).fetchone()
+    return "provider_task_links" if row else "external_tasks"
+
+
 def plan_item(connection: sqlite3.Connection, category: str, item: dict) -> tuple[str, sqlite3.Row | None, sqlite3.Row | None]:
+    links = link_table(connection)
     link = connection.execute(
-        "SELECT * FROM external_tasks WHERE provider = 'plane' AND remote_id = ?", (item["id"],)
+        f"SELECT * FROM {links} WHERE provider = 'plane' AND remote_id = ?", (item["id"],)
     ).fetchone()
     if not link:
         return "create", None, None
@@ -210,6 +216,7 @@ def insert_status_event(connection: sqlite3.Connection, task_id: str, previous: 
 
 def apply_item(connection: sqlite3.Connection, category: str, item: dict, action: str, link: sqlite3.Row | None, task: sqlite3.Row | None) -> None:
     timestamp = utc_now()
+    links = link_table(connection)
     if action == "create":
         task_id = new_id()
         connection.execute(
@@ -221,13 +228,22 @@ def apply_item(connection: sqlite3.Connection, category: str, item: dict, action
              timestamp, timestamp),
         )
         insert_status_event(connection, task_id, None, item["status"], timestamp)
-        connection.execute(
-            "INSERT INTO external_tasks (provider, remote_id, task_id, remote_key, remote_url, project_id, "
-            "remote_updated_at, last_local_updated_at, last_synced_at, sync_state, remote_payload_json) "
-            "VALUES ('plane', ?, ?, ?, ?, ?, ?, ?, ?, 'in_sync', ?)",
-            (item["id"], task_id, item["key"], item["url"], item["project_id"], item["updated_at"],
-             timestamp, timestamp, item["payload"]),
-        )
+        if links == "provider_task_links":
+            connection.execute(
+                "INSERT INTO provider_task_links (task_id, provider, remote_id, remote_key, remote_url, project_id, "
+                "remote_updated_at, last_local_updated_at, last_synced_at, sync_state, remote_payload_json, created_at_utc, updated_at_utc) "
+                "VALUES (?, 'plane', ?, ?, ?, ?, ?, ?, ?, 'in_sync', ?, ?, ?)",
+                (task_id, item["id"], item["key"], item["url"], item["project_id"], item["updated_at"],
+                 timestamp, timestamp, item["payload"], timestamp, timestamp),
+            )
+        else:
+            connection.execute(
+                "INSERT INTO external_tasks (provider, remote_id, task_id, remote_key, remote_url, project_id, "
+                "remote_updated_at, last_local_updated_at, last_synced_at, sync_state, remote_payload_json) "
+                "VALUES ('plane', ?, ?, ?, ?, ?, ?, ?, ?, 'in_sync', ?)",
+                (item["id"], task_id, item["key"], item["url"], item["project_id"], item["updated_at"],
+                 timestamp, timestamp, item["payload"]),
+            )
         return
 
     assert link is not None and task is not None
@@ -269,9 +285,9 @@ def apply_item(connection: sqlite3.Connection, category: str, item: dict, action
         sync_state = "in_sync"
 
     connection.execute(
-        "UPDATE external_tasks SET remote_key = ?, remote_url = ?, project_id = ?, remote_updated_at = ?, "
+        f"UPDATE {links} SET remote_key = ?, remote_url = ?, project_id = ?, remote_updated_at = ?, "
         "last_local_updated_at = ?, last_synced_at = ?, sync_state = ?, remote_payload_json = ? "
-        "WHERE provider = 'plane' AND remote_id = ?",
+        f"WHERE provider = 'plane' AND remote_id = ?",
         (item["key"], item["url"], item["project_id"], recorded_remote_updated_at, last_local_updated_at,
          timestamp, sync_state, item["payload"], item["id"]),
     )
