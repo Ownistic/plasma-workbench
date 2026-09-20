@@ -17,6 +17,7 @@ read_source("package/contents/ui/YearHeatmap.qml" year_heatmap)
 read_source("package/contents/ui/SettingsPage.qml" settings_page)
 read_source("package/contents/ui/WorkbenchSettingsPage.qml" workbench_settings_page)
 read_source("package/contents/ui/PlaneSettings.qml" plane_settings)
+read_source("package/contents/ui/PlaneOwnerPicker.qml" plane_owner_picker)
 read_source("package/contents/ui/WorkflowStatusSettings.qml" workflow_status_settings)
 read_source("package/contents/ui/ConfigGeneral.qml" config_general)
 read_source("package/contents/config/main.xml" config_xml)
@@ -57,6 +58,9 @@ if(NOT todo_board MATCHES "workflowStatuses" OR NOT plane_settings MATCHES "root
 endif()
 if(NOT plane_settings MATCHES "existingMapping \\? existingMapping\\.localStatus : defaultStatus" OR NOT plane_settings MATCHES "function saveStateMapping")
     message(FATAL_ERROR "Plane state mappings must preserve saved choices when metadata is refreshed and report save failures")
+endif()
+if(NOT task_details MATCHES "PlaneOwnerPicker" OR NOT todo_board MATCHES "PlaneOwnerPicker" OR NOT plane_owner_picker MATCHES "Search members" OR NOT plane_owner_picker MATCHES "function chooseOwner")
+    message(FATAL_ERROR "Plane task owners must use the shared searchable single-owner picker")
 endif()
 
 # Report visualizations must retain every approved entry point and preserve

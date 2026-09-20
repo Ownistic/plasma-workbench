@@ -1692,22 +1692,15 @@ Item {
                 Accessible.name: i18n("Task category")
             }
 
-            Repeater {
-                model: taskCategory.currentIndex >= 0 && taskCategory.currentIndex < categoryModel.count
+            PlaneOwnerPicker {
+                Layout.fillWidth: true
+                visible: members.length > 0
+                members: taskCategory.currentIndex >= 0 && taskCategory.currentIndex < categoryModel.count
                     ? Database.listProviderMembers(root.selectedWorkspaceId, "plane", root.planeProjectForCategory(categoryModel.get(taskCategory.currentIndex).id)) : []
-
-                delegate: PlasmaComponents.CheckBox {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    text: modelData.memberName || modelData.memberEmail || modelData.memberId
-                    checked: taskAssigneeIds.indexOf(modelData.memberId) !== -1
-                    onToggled: {
-                        const next = taskAssigneeIds.slice()
-                        const index = next.indexOf(modelData.memberId)
-                        if (checked && index === -1) next.push(modelData.memberId)
-                        if (!checked && index !== -1) next.splice(index, 1)
-                        taskAssigneeIds = next
-                    }
+                assigneeIds: createTaskDialog.taskAssigneeIds
+                popupParent: createTaskDialog.contentItem
+                onSelectionChanged: function(assigneeIds) {
+                    createTaskDialog.taskAssigneeIds = assigneeIds
                 }
             }
 

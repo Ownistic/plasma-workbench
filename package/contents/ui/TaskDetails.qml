@@ -121,16 +121,22 @@ FocusScope {
     }
 
     function planeMembers() {
-        return root.planeLink && root.planeLink.projectId
-            ? Database.listProviderMembers(root.board.selectedWorkspaceId, "plane", root.planeLink.projectId) : []
+        const projectId = root.planeLink && root.planeLink.projectId
+            ? root.planeLink.projectId : root.planeProjectForCategory()
+        return projectId ? Database.listProviderMembers(root.board.selectedWorkspaceId, "plane", projectId) : []
     }
 
-    function setPlaneAssignee(memberId, enabled) {
-        const next = root.planeAssigneeIds.slice()
-        const index = next.indexOf(memberId)
-        if (enabled && index === -1) next.push(memberId)
-        if (!enabled && index !== -1) next.splice(index, 1)
-        root.planeAssigneeIds = next
+    function planeProjectForCategory() {
+        if (!root.task) {
+            return ""
+        }
+        const mappings = Database.listProviderProjectMappings(root.board.selectedWorkspaceId)
+        for (let index = 0; index < mappings.length; ++index) {
+            if (mappings[index].provider === "plane" && mappings[index].categoryId === root.task.category_id) {
+                return mappings[index].remoteProjectId
+            }
+        }
+        return ""
     }
 
     function refreshDailyTimeline() {
@@ -462,16 +468,14 @@ FocusScope {
                     color: Kirigami.Theme.disabledTextColor
                 }
 
-                Repeater {
-                    model: root.planeMembers()
-
-                    delegate: PlasmaComponents.CheckBox {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        text: modelData.memberName || modelData.memberEmail || modelData.memberId
-                        checked: root.planeAssigneeIds.indexOf(modelData.memberId) !== -1
-                        Accessible.name: i18n("Assign Plane task to %1", text)
-                        onToggled: root.setPlaneAssignee(modelData.memberId, checked)
+                PlaneOwnerPicker {
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 20
+                    visible: root.planeLink || root.planeMembers().length > 0
+                    members: root.planeMembers()
+                    assigneeIds: root.planeAssigneeIds
+                    popupParent: popupHost
+                    onSelectionChanged: function(assigneeIds) {
+                        root.planeAssigneeIds = assigneeIds
                     }
                 }
             }

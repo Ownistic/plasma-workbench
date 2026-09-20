@@ -170,6 +170,11 @@ TestCase {
         compare(pending.assigneeIds.length, 2)
         compare(pending.managedBaseline.title, task.title)
 
+        const singleOwner = Database.updateTaskExternalLink({ taskId: task.id, assigneeIds: ["member-1"] })
+        compare(singleOwner.assigneeIds.length, 1)
+        compare(singleOwner.assigneeIds[0], "member-1")
+        compare(Database.updateTaskExternalLink({ taskId: task.id, assigneeIds: [] }).assigneeIds.length, 0)
+
         const synced = Database.updateTaskExternalLink({ taskId: task.id, remoteId: "issue-1", remoteKey: "FOUR-1",
             remoteUrl: "https://app.plane.so/fourleaf/browse/FOUR-1", remoteUpdatedAt: "2026-09-19T10:00:00.000Z",
             remoteRevision: "rev-1", lastSyncedAt: "2026-09-19T10:00:00.000Z", syncState: "in_sync" })
