@@ -16,6 +16,10 @@ its own project-oriented categories.
 | Exact session editing | Rolling year heatmap |
 | ![Workbench exact-time session editor below the daily timeline](docs/screenshots/workbench-session-editor.png) | ![Workbench rolling 365-day heatmap with three months of tracked work](docs/screenshots/workbench-year-heatmap.png) |
 
+### Plane task owner
+
+![A Plane-linked Workbench task with the searchable cached-member owner picker open](docs/screenshots/workbench-plane-owner-picker.png)
+
 ## Build and Test
 
 The data repository is QML JavaScript using `QtQuick.LocalStorage`. A small Qt 6 QML module supplies IANA timezone and daylight-saving-safe report calculations.
@@ -73,13 +77,33 @@ Use the convenience scripts for a user-scoped install, upgrade, or removal:
 ./scripts/remove.sh
 ```
 
-## Plane sync
+## Plane integration
 
-`scripts/sync-plane.py` imports assigned Plane work items into the `4leaflabs`
-workspace without changing Plane. Live pulls route each item to the category
-matching its Plane project. It previews changes unless
-`--apply` is supplied, preserves work sessions, and records stable Plane IDs so
-repeated pulls do not create duplicates.
+Plane is an optional extension of an independent local workbench. Local
+workbenches, categories, tasks, time tracking, reports, and workflows remain
+available without a Plane connection.
+
+From a workbench's **Workbench settings**, choose **Add Plane** and provide the
+Plane API URL, workspace slug, and personal access token. The token is kept in
+KWallet rather than Workbench's LocalStorage database. Then refresh Plane
+projects and map only the local categories that should synchronize; unmapped
+categories remain local-only.
+
+Each workbench owns its local workflow. Add any statuses your team needs,
+mark terminal statuses as completing tasks, then map each discovered Plane
+state to one of those local statuses. Mapping changes save to that workbench
+immediately and remain in place when Plane metadata is refreshed.
+
+Tasks in mapped categories can be created and updated in Plane, and **Sync
+linked tasks** pulls assigned work after an assignee ID is configured. The task
+owner picker uses the cached members for its mapped Plane project, so choosing
+an owner is fast and works from the local cache; it updates the next task sync.
+
+The legacy command-line importer remains available for a read-only Plane pull.
+It imports assigned Plane work items into the `4leaflabs` workspace without
+changing Plane. It previews changes unless `--apply` is supplied, preserves
+work sessions, and records stable Plane IDs so repeated pulls do not create
+duplicates.
 
 Use a normalized JSON snapshot:
 

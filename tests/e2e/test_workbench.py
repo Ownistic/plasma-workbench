@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import sqlite3
@@ -326,6 +327,87 @@ class WorkbenchEndToEndTest(unittest.TestCase):
                 "UPDATE tasks SET tracked_seconds = tracked_seconds + ? WHERE id = ?",
                 (sum(session[5] for session in sessions), str(task[0])),
             )
+
+    def seed_plane_owner_fixture(self, task_title: str) -> None:
+        """Create a cached Plane link and members without any network request."""
+        data_home = Path(os.environ["XDG_DATA_HOME"])
+        database_paths = list(data_home.glob("**/QML/OfflineStorage/Databases/*.sqlite"))
+        self.assertEqual(len(database_paths), 1, f"Expected one Qt LocalStorage database in {data_home}")
+
+        timestamp = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        with sqlite3.connect(database_paths[0], timeout=10) as database:
+            task = database.execute(
+                "SELECT tasks.id, categories.id, categories.workspace_id FROM tasks "
+                "JOIN categories ON categories.id = tasks.category_id WHERE tasks.title = ?",
+                (task_title,),
+            ).fetchone()
+            self.assertIsNotNone(task)
+            task_id, category_id, workspace_id = (str(value) for value in task)
+            project_id = "plane-readme-project"
+
+            database.execute(
+                "INSERT INTO workspace_providers "
+                "(workspace_id, provider, connection_id, config_json, created_at_utc, updated_at_utc) "
+                "VALUES (?, 'plane', 'readme-plane', ?, ?, ?) "
+                "ON CONFLICT(workspace_id) DO UPDATE SET provider = excluded.provider, "
+                "connection_id = excluded.connection_id, config_json = excluded.config_json, "
+                "updated_at_utc = excluded.updated_at_utc",
+                (workspace_id, json.dumps({"baseUrl": "https://api.plane.so", "workspace": "4leaf-labs"}), timestamp, timestamp),
+            )
+            database.execute(
+                "INSERT INTO provider_project_mappings "
+                "(category_id, workspace_id, provider, remote_project_id, remote_project_name, created_at_utc, updated_at_utc) "
+                "VALUES (?, ?, 'plane', ?, '4leaflabs', ?, ?) "
+                "ON CONFLICT(category_id) DO UPDATE SET workspace_id = excluded.workspace_id, provider = excluded.provider, "
+                "remote_project_id = excluded.remote_project_id, remote_project_name = excluded.remote_project_name, "
+                "updated_at_utc = excluded.updated_at_utc",
+                (category_id, workspace_id, project_id, timestamp, timestamp),
+            )
+            database.execute(
+                "DELETE FROM provider_members WHERE workspace_id = ? AND provider = 'plane' AND project_id = ?",
+                (workspace_id, project_id),
+            )
+            members = [
+                ("member-ari", "Ari Vega", "ari@example.test"),
+                ("member-mila", "Mila Chen", "mila@example.test"),
+                ("member-sam", "Sam Patel", "sam@example.test"),
+            ]
+            database.executemany(
+                "INSERT INTO provider_members "
+                "(workspace_id, provider, project_id, member_id, member_name, member_email, member_payload_json, updated_at_utc) "
+                "VALUES (?, 'plane', ?, ?, ?, ?, '{}', ?)",
+                [(workspace_id, project_id, member_id, name, email, timestamp) for member_id, name, email in members],
+            )
+            database.execute(
+                "INSERT INTO provider_task_links "
+                "(task_id, provider, remote_id, remote_key, remote_url, project_id, remote_updated_at, remote_revision, "
+                "last_local_updated_at, last_synced_at, sync_state, sync_error, assignee_ids_json, managed_baseline_json, "
+                "remote_payload_json, created_at_utc, updated_at_utc) "
+                "VALUES (?, 'plane', 'plane-readme-task', '4LEAF-42', 'https://app.plane.so/4leaf-labs/browse/4LEAF-42', "
+                "?, ?, 'readme-revision', ?, ?, 'in_sync', NULL, ?, '{}', '{}', ?, ?) "
+                "ON CONFLICT(task_id) DO UPDATE SET provider = excluded.provider, remote_id = excluded.remote_id, "
+                "remote_key = excluded.remote_key, remote_url = excluded.remote_url, project_id = excluded.project_id, "
+                "remote_updated_at = excluded.remote_updated_at, remote_revision = excluded.remote_revision, "
+                "last_synced_at = excluded.last_synced_at, sync_state = excluded.sync_state, sync_error = excluded.sync_error, "
+                "assignee_ids_json = excluded.assignee_ids_json, updated_at_utc = excluded.updated_at_utc",
+                (task_id, project_id, timestamp, timestamp, timestamp, json.dumps(["member-ari"]), timestamp, timestamp),
+            )
+
+    def test_z_plane_owner_picker_uses_cached_project_members(self) -> None:
+        category_name = "Plane launch"
+        task_title = "Coordinate Plane launch"
+        self.create_category(category_name)
+        self.create_task(task_title, category_name, category_index=2)
+        self.seed_plane_owner_fixture(task_title)
+
+        task_card = self.wait.until(lambda _driver: self.visible_task_card(task_title))
+        assert isinstance(task_card, WebElement)
+        task_card.send_keys(Keys.ENTER)
+        owner_picker = self.element("Plane owner: Ari Vega")
+        owner_picker.click()
+        self.element("Search Plane members")
+        self.element("Assign Plane task to Mila Chen")
+        self.capture_screenshot("plane-owner-picker")
 
     def test_report_navigation_remains_bounded(self) -> None:
         self.create_category()

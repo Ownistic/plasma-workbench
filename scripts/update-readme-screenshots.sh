@@ -30,5 +30,8 @@ magick "${ARTIFACT_DIR}/daily-editor-compact-editing.png" \
 magick "${ARTIFACT_DIR}/daily-editor-compact-year-populated.png" \
     -crop "${CAPTURE_GEOMETRY}" +repage -strip \
     "${OUTPUT_DIR}/workbench-year-heatmap.png"
+magick "${ARTIFACT_DIR}/daily-editor-compact-plane-owner-picker.png" \
+    -crop "${CAPTURE_GEOMETRY}" +repage -strip \
+    "${OUTPUT_DIR}/workbench-plane-owner-picker.png"
 
 echo "Updated README screenshots in ${OUTPUT_DIR}."
