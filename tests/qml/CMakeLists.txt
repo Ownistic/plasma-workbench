@@ -15,6 +15,7 @@ add_test(
 )
 set_tests_properties(DatabaseRepository PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    LABELS "fast;integration;qml"
 )
 
 add_test(
@@ -23,6 +24,7 @@ add_test(
 )
 set_tests_properties(CategoryDragE2E PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    LABELS "fast;integration;qml"
 )
 
 add_test(
@@ -44,12 +46,24 @@ add_test(
         ${CMAKE_SOURCE_DIR}/package/contents/ui/DailyTimeline.qml
         ${CMAKE_SOURCE_DIR}/package/contents/ui/YearHeatmap.qml
 )
+set_tests_properties(UserReportedUiQmlSyntax PROPERTIES LABELS "fast;static;qml")
 
 add_test(
     NAME UserReportedUiContracts
     COMMAND ${CMAKE_COMMAND}
         -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/VerifyUserReportedUiContracts.cmake
+)
+set_tests_properties(UserReportedUiContracts PROPERTIES LABELS "fast;static;qml")
+
+add_test(
+    NAME RepositoryBenchmark
+    COMMAND ${QMLTESTRUNNER} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark
+)
+set_tests_properties(RepositoryBenchmark PROPERTIES
+    DISABLED TRUE
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    LABELS benchmark
 )
 
 add_custom_target(benchmark-repository

@@ -15,7 +15,7 @@ if(WORKBENCH_E2E_PYTHON_EXECUTABLE)
             PYTHONPYCACHEPREFIX=${CMAKE_BINARY_DIR}/python-cache
             ${WORKBENCH_E2E_PYTHON_EXECUTABLE} -m py_compile ${WORKBENCH_APPIUM_TEST}
     )
-    set_tests_properties(AppiumTestSyntax PROPERTIES LABELS "e2e;static")
+    set_tests_properties(AppiumTestSyntax PROPERTIES LABELS "fast;static")
 else()
     message(STATUS "Python3 not found; Appium test syntax check is not registered")
 endif()

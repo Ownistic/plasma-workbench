@@ -1,0 +1,57 @@
+name: Fast tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-test:
+    name: Fast test gate
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel@sha256:305558d2bce0b33170f7f7e4ee690633df4b1e0bdfd8194fe45a6545172319ce
+    steps:
+      - name: Install build and test dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            cmake extra-cmake-modules git kpackage kirigami ninja \
+            plasma-framework python python-pip qt6-base qt6-declarative \
+            qqc2-desktop-style
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install coverage tools
+        run: |
+          python -m venv .ci-venv
+          .ci-venv/bin/pip install --upgrade pip
+          .ci-venv/bin/pip install diff-cover gcovr
+      - name: Configure coverage build
+        run: cmake -S . -B build-coverage -G Ninja -DWORKBENCH_ENABLE_COVERAGE=ON
+      - name: Run fast test gate
+        run: cmake --build build-coverage --target fast-test
+      - name: Validate matrix directly
+        run: python scripts/validate-test-matrix.py --prd PRD.md --matrix docs/planning/TEST_COVERAGE_MATRIX.md
+      - name: Generate native coverage
+        run: |
+          .ci-venv/bin/gcovr \
+            --root . \
+            --object-directory build-coverage \
+            --filter 'src/' \
+            --exclude 'tests/' \
+            --cobertura-pretty \
+            --output coverage.xml
+      - name: Enforce changed native-line coverage
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: .ci-venv/bin/diff-cover coverage.xml --compare-branch "$BASE_SHA" --fail-under=80
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-test-artifacts
+          path: |
+            build-coverage/Testing/Temporary
+            build-coverage/**/*.log
+            coverage.xml
+          if-no-files-found: ignore

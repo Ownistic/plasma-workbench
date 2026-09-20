@@ -1,4 +1,5 @@
 /build/
+/build-coverage/
 *.plasmoid
 /package/contents/ui/time/
 /package/contents/ui/plane/

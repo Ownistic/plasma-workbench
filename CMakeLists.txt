@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.21)
 
 project(Workbench VERSION 0.1.0 LANGUAGES CXX)
 
+option(WORKBENCH_ENABLE_COVERAGE "Instrument native targets for gcov-compatible coverage" OFF)
+if(WORKBENCH_ENABLE_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        message(FATAL_ERROR "WORKBENCH_ENABLE_COVERAGE requires a GNU- or Clang-compatible compiler")
+    endif()
+    add_compile_options(-O0 -g --coverage)
+    add_link_options(--coverage)
+endif()
+
 find_package(ECM 6.0 REQUIRED NO_MODULE)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
 include(KDEInstallDirs)
@@ -82,6 +91,7 @@ if(BUILD_TESTING)
     add_subdirectory(tests/time)
     add_subdirectory(tests/plane)
     add_subdirectory(tests/qml)
+    add_subdirectory(tests/planning)
     add_subdirectory(tests/e2e)
 
     add_test(
@@ -109,4 +119,16 @@ if(BUILD_TESTING)
         )
         set_tests_properties(plasmoid-archive-install PROPERTIES LABELS packaging RUN_SERIAL TRUE)
     endif()
+
+    set_tests_properties(plasmoid-cmake-install PROPERTIES LABELS "fast;packaging")
+    if(TEST plasmoid-archive-install)
+        set_tests_properties(plasmoid-archive-install PROPERTIES LABELS "fast;packaging")
+    endif()
+
+    add_custom_target(fast-test
+        COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} -L fast --output-on-failure
+        DEPENDS workbench_timeplugin workbench_planeplugin tst_timemath tst_planesync
+        USES_TERMINAL
+        COMMENT "Running the pull-request fast test gate"
+    )
 endif()

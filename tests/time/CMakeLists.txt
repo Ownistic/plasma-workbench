@@ -10,3 +10,4 @@ target_link_libraries(tst_timemath
 )
 
 add_test(NAME TimeMath COMMAND tst_timemath)
+set_tests_properties(TimeMath PROPERTIES LABELS "fast;unit")
