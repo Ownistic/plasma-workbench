@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
@@ -13,12 +14,19 @@ Item {
     readonly property var planeBinding: board.selectedWorkspaceProvider
     readonly property var planeConfig: planeBinding && planeBinding.config ? planeBinding.config : ({})
 
-    ColumnLayout {
+    Controls.ScrollView {
+        id: pageScroll
         anchors.fill: parent
-        anchors.margins: Kirigami.Units.largeSpacing
-        spacing: Kirigami.Units.largeSpacing
+        contentWidth: availableWidth
+        clip: true
 
-        RowLayout {
+        ColumnLayout {
+            x: Kirigami.Units.largeSpacing
+            y: Kirigami.Units.largeSpacing
+            width: Math.max(0, pageScroll.availableWidth - Kirigami.Units.largeSpacing * 2)
+            spacing: Kirigami.Units.largeSpacing
+
+            RowLayout {
             Layout.fillWidth: true
 
             PlasmaComponents.ToolButton {
@@ -46,7 +54,7 @@ Item {
             }
         }
 
-        RowLayout {
+            RowLayout {
             objectName: "workbench-connection-summary"
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
@@ -81,11 +89,16 @@ Item {
             }
         }
 
-        PlaneSettings {
-            Layout.fillWidth: true
-            board: root.board
-        }
+            WorkflowStatusSettings {
+                Layout.fillWidth: true
+                board: root.board
+            }
 
-        Item { Layout.fillHeight: true }
+            PlaneSettings {
+                Layout.fillWidth: true
+                board: root.board
+            }
+
+        }
     }
 }

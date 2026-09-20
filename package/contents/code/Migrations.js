@@ -1,6 +1,6 @@
 .pragma library
 
-const CURRENT_VERSION = 11
+const CURRENT_VERSION = 12
 
 const migrations = [
     {
@@ -242,6 +242,100 @@ const migrations = [
                 "AND instr(tasks.details, char(10) || char(10) || 'Plane project:') > 0 " +
                 "AND tasks.details LIKE '%' || external_tasks.remote_url)"
         ]
+    },
+    {
+        // Statuses belong to a workbench, rather than to the application. Keep
+        // the established identifiers so installed tasks and Plane mappings
+        // continue to work, while allowing each workbench to extend its flow.
+        version: 12,
+        statements: [
+            "CREATE TABLE IF NOT EXISTS workflow_statuses (" +
+                "workspace_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, is_completed INTEGER NOT NULL DEFAULT 0, " +
+                "position INTEGER NOT NULL, created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL, " +
+                "PRIMARY KEY (workspace_id, id), FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON UPDATE CASCADE ON DELETE CASCADE, " +
+                "CHECK (length(trim(id)) BETWEEN 1 AND 100), CHECK (length(trim(name)) BETWEEN 1 AND 100), CHECK (is_completed IN (0, 1)))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS workflow_statuses_workspace_position_idx ON workflow_statuses(workspace_id, position)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS workflow_statuses_workspace_name_idx ON workflow_statuses(workspace_id, name COLLATE NOCASE)",
+            "INSERT OR IGNORE INTO workflow_statuses (workspace_id, id, name, is_completed, position, created_at_utc, updated_at_utc) " +
+                "SELECT workspaces.id, 'backlog', 'Backlog', 0, 1024, ?, ? FROM workspaces",
+            "INSERT OR IGNORE INTO workflow_statuses (workspace_id, id, name, is_completed, position, created_at_utc, updated_at_utc) " +
+                "SELECT workspaces.id, 'ready', 'Ready', 0, 2048, ?, ? FROM workspaces",
+            "INSERT OR IGNORE INTO workflow_statuses (workspace_id, id, name, is_completed, position, created_at_utc, updated_at_utc) " +
+                "SELECT workspaces.id, 'in_progress', 'In progress', 0, 3072, ?, ? FROM workspaces",
+            "INSERT OR IGNORE INTO workflow_statuses (workspace_id, id, name, is_completed, position, created_at_utc, updated_at_utc) " +
+                "SELECT workspaces.id, 'blocked', 'Blocked', 0, 4096, ?, ? FROM workspaces",
+            "INSERT OR IGNORE INTO workflow_statuses (workspace_id, id, name, is_completed, position, created_at_utc, updated_at_utc) " +
+                "SELECT workspaces.id, 'completed', 'Completed', 1, 5120, ?, ? FROM workspaces",
+            "DROP TRIGGER IF EXISTS tasks_category_exists_insert",
+            "DROP TRIGGER IF EXISTS tasks_category_exists_update",
+            "DROP TRIGGER IF EXISTS sessions_task_exists_insert",
+            "DROP TRIGGER IF EXISTS sessions_task_exists_update",
+            "DROP TRIGGER IF EXISTS external_tasks_task_exists_insert",
+            "DROP TRIGGER IF EXISTS external_tasks_task_exists_update",
+            "DROP TRIGGER IF EXISTS provider_task_links_task_exists_insert",
+            "DROP TRIGGER IF EXISTS provider_task_links_task_exists_update",
+            "DROP INDEX IF EXISTS tasks_category_position_idx",
+            "DROP INDEX IF EXISTS tasks_status_idx",
+            "DROP INDEX IF EXISTS tasks_archived_status_idx",
+            "ALTER TABLE tasks RENAME TO tasks_v11",
+            "CREATE TABLE tasks (" +
+                "id TEXT PRIMARY KEY, category_id TEXT NOT NULL, title TEXT NOT NULL, details TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, position INTEGER NOT NULL, " +
+                "archived_at_utc TEXT, completed_at_utc TEXT, created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL, tracked_seconds INTEGER NOT NULL DEFAULT 0, " +
+                "FOREIGN KEY (category_id) REFERENCES categories(id) ON UPDATE CASCADE ON DELETE RESTRICT, " +
+                "CHECK (length(trim(title)) BETWEEN 1 AND 200))",
+            "INSERT INTO tasks (id, category_id, title, details, status, position, archived_at_utc, completed_at_utc, created_at_utc, updated_at_utc, tracked_seconds) " +
+                "SELECT id, category_id, title, details, status, position, archived_at_utc, completed_at_utc, created_at_utc, updated_at_utc, tracked_seconds FROM tasks_v11",
+            "DROP TABLE tasks_v11",
+            "CREATE UNIQUE INDEX tasks_category_position_idx ON tasks(category_id, position)",
+            "CREATE INDEX tasks_status_idx ON tasks(status)",
+            "CREATE INDEX tasks_archived_status_idx ON tasks(archived_at_utc, status)",
+            "CREATE TRIGGER tasks_category_exists_insert BEFORE INSERT ON tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM categories WHERE id = NEW.category_id) BEGIN SELECT RAISE(ABORT, 'Task category does not exist'); END",
+            "CREATE TRIGGER tasks_category_exists_update BEFORE UPDATE OF category_id ON tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM categories WHERE id = NEW.category_id) BEGIN SELECT RAISE(ABORT, 'Task category does not exist'); END",
+            "CREATE TRIGGER sessions_task_exists_insert BEFORE INSERT ON work_sessions FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'Work-session task does not exist'); END",
+            "CREATE TRIGGER sessions_task_exists_update BEFORE UPDATE OF task_id ON work_sessions FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'Work-session task does not exist'); END",
+            "CREATE TRIGGER external_tasks_task_exists_insert BEFORE INSERT ON external_tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'External task does not exist'); END",
+            "CREATE TRIGGER external_tasks_task_exists_update BEFORE UPDATE OF task_id ON external_tasks FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'External task does not exist'); END",
+            "CREATE TRIGGER provider_task_links_task_exists_insert BEFORE INSERT ON provider_task_links FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'Provider task does not exist'); END",
+            "CREATE TRIGGER provider_task_links_task_exists_update BEFORE UPDATE OF task_id ON provider_task_links FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'Provider task does not exist'); END",
+            "DROP TRIGGER IF EXISTS events_task_exists_insert",
+            "DROP TRIGGER IF EXISTS events_task_exists_update",
+            "DROP INDEX IF EXISTS status_events_task_time_idx",
+            "DROP INDEX IF EXISTS status_events_task_sequence_idx",
+            "ALTER TABLE status_events RENAME TO status_events_v11",
+            "CREATE TABLE status_events (" +
+                "id TEXT PRIMARY KEY, task_id TEXT NOT NULL, previous_status TEXT, status TEXT NOT NULL, occurred_at_utc TEXT NOT NULL, sequence INTEGER NOT NULL, " +
+                "manually_edited INTEGER NOT NULL DEFAULT 0, created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL, " +
+                "FOREIGN KEY (task_id) REFERENCES tasks(id) ON UPDATE CASCADE ON DELETE CASCADE)",
+            "INSERT INTO status_events (id, task_id, previous_status, status, occurred_at_utc, sequence, manually_edited, created_at_utc, updated_at_utc) " +
+                "SELECT id, task_id, previous_status, status, occurred_at_utc, sequence, manually_edited, created_at_utc, updated_at_utc FROM status_events_v11",
+            "DROP TABLE status_events_v11",
+            "CREATE INDEX status_events_task_time_idx ON status_events(task_id, occurred_at_utc)",
+            "CREATE UNIQUE INDEX status_events_task_sequence_idx ON status_events(task_id, sequence)",
+            "CREATE TRIGGER events_task_exists_insert BEFORE INSERT ON status_events FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'Status-event task does not exist'); END",
+            "CREATE TRIGGER events_task_exists_update BEFORE UPDATE OF task_id ON status_events FOR EACH ROW WHEN NOT EXISTS " +
+                "(SELECT 1 FROM tasks WHERE id = NEW.task_id) BEGIN SELECT RAISE(ABORT, 'Status-event task does not exist'); END",
+            "DROP INDEX IF EXISTS provider_state_mappings_outbound_idx",
+            "ALTER TABLE provider_state_mappings RENAME TO provider_state_mappings_v11",
+            "CREATE TABLE provider_state_mappings (" +
+                "workspace_id TEXT NOT NULL, provider TEXT NOT NULL, project_id TEXT NOT NULL, remote_state_id TEXT NOT NULL, " +
+                "local_status TEXT NOT NULL, is_outbound INTEGER NOT NULL DEFAULT 0, remote_state_name TEXT NOT NULL DEFAULT '', " +
+                "created_at_utc TEXT NOT NULL, updated_at_utc TEXT NOT NULL, " +
+                "PRIMARY KEY (workspace_id, provider, project_id, remote_state_id), " +
+                "FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON UPDATE CASCADE ON DELETE CASCADE, CHECK (is_outbound IN (0, 1)))",
+            "INSERT INTO provider_state_mappings (workspace_id, provider, project_id, remote_state_id, local_status, is_outbound, remote_state_name, created_at_utc, updated_at_utc) " +
+                "SELECT workspace_id, provider, project_id, remote_state_id, local_status, is_outbound, remote_state_name, created_at_utc, updated_at_utc FROM provider_state_mappings_v11",
+            "DROP TABLE provider_state_mappings_v11",
+            "CREATE UNIQUE INDEX provider_state_mappings_outbound_idx ON provider_state_mappings(workspace_id, provider, project_id, local_status) WHERE is_outbound = 1"
+        ]
     }
 ]
 
@@ -267,7 +361,8 @@ function apply(tx, appliedAtUtc) {
         }
         for (let statementIndex = 0; statementIndex < migration.statements.length; statementIndex += 1) {
             const statement = migration.statements[statementIndex]
-            const parameters = migration.version === 8 && statement.indexOf("SELECT 'workspace-") !== -1
+            const parameters = (migration.version === 8 && statement.indexOf("SELECT 'workspace-") !== -1)
+                || (migration.version === 12 && statement.indexOf("SELECT workspaces.id") !== -1)
                 ? [appliedAtUtc, appliedAtUtc] : []
             tx.executeSql(statement, parameters)
         }

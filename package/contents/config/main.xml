@@ -10,9 +10,6 @@
         <entry name="reportTimezone" type="String">
             <default></default>
         </entry>
-        <entry name="defaultStatusFilter" type="String">
-            <default>backlog,ready,in_progress,blocked</default>
-        </entry>
         <entry name="showArchivedTasks" type="Bool">
             <default>false</default>
         </entry>

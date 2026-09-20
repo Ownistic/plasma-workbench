@@ -75,6 +75,40 @@ TestCase {
         compare(Database.listTasks({ workspaceId: workWorkspace.id }).length, 2)
     }
 
+    function test_workbenchWorkflowStatusesAreScopedAndTerminal() {
+        const workspace = Database.listWorkspaces()[0]
+        const otherWorkspace = Database.createWorkspace({ name: "Other workbench" })
+        const category = Database.createCategory({ workspaceId: workspace.id, name: "Product", color: "#3daee9" })
+        const otherCategory = Database.createCategory({ workspaceId: otherWorkspace.id, name: "Other", color: "#8ae234" })
+
+        const defaults = Database.listWorkflowStatuses(workspace.id)
+        compare(defaults.length, 5)
+        compare(defaults[0].id, "backlog")
+        compare(defaults[4].isCompleted, true)
+        const review = Database.createWorkflowStatus({ workspaceId: workspace.id, name: "Ready for review", isCompleted: false })
+        const released = Database.createWorkflowStatus({ workspaceId: workspace.id, name: "Released", isCompleted: true })
+        compare(Database.listWorkflowStatuses(workspace.id).length, 7)
+        compare(Database.listWorkflowStatuses(otherWorkspace.id).length, 5)
+
+        const task = Database.createTask({ categoryId: category.id, title: "Ship", status: review.id })
+        Database.startTimer(task.id, "Etc/UTC", "2026-09-20T10:00:00.000Z")
+        Database.changeStatus(task.id, released.id)
+        compare(Database.getTask(task.id).status, released.id)
+        verify(Database.getTask(task.id).completed_at_utc !== null)
+        compare(Database.getActiveSession(), null)
+
+        assertThrows(function() {
+            Database.createTask({ categoryId: otherCategory.id, title: "Wrong workbench", status: review.id })
+        }, "not defined for this workbench")
+        assertThrows(function() {
+            Database.moveTask({ taskId: task.id, targetCategoryId: otherCategory.id })
+        }, "status history")
+        assertThrows(function() {
+            Database.saveProviderStateMapping({ workspaceId: otherWorkspace.id, provider: "plane", projectId: "project-1",
+                remoteStateId: "state-1", localStatus: review.id })
+        }, "not defined for this workbench")
+    }
+
     function test_providerBindingMappingsAndMemberCacheRemainOptional() {
         const workspace = Database.listWorkspaces()[0]
         const category = Database.createCategory({ workspaceId: workspace.id, name: "Plane work", color: "#3daee9" })

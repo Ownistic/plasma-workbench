@@ -18,12 +18,14 @@ TestCase {
             tx.executeSql("INSERT INTO schema_migrations (version, applied_at_utc) VALUES (1, '2026-01-01T00:00:00.000Z')")
             tx.executeSql("INSERT INTO categories (id, name, color, position, collapsed, created_at_utc, updated_at_utc) VALUES ('work', '4leaflabs', '#3daee9', 1024, 0, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')")
             tx.executeSql("INSERT INTO categories (id, name, color, position, collapsed, created_at_utc, updated_at_utc) VALUES ('personal', 'Personal', '#8ae234', 2048, 0, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')")
+            tx.executeSql("INSERT INTO tasks (id, category_id, title, details, status, position, created_at_utc, updated_at_utc) VALUES ('legacy-task', 'work', 'Legacy task', '', 'completed', 1024, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')")
+            tx.executeSql("INSERT INTO status_events (id, task_id, status, occurred_at_utc, created_at_utc, updated_at_utc) VALUES ('legacy-event', 'legacy-task', 'completed', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')")
 
             Migrations.apply(tx, "2026-01-02T00:00:00.000Z")
 
             const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
-            compare(versions.rows.length, 11)
-            compare(versions.rows.item(10).version, 11)
+            compare(versions.rows.length, 12)
+            compare(versions.rows.item(11).version, 12)
             const categoryColumns = tx.executeSql("PRAGMA table_info(categories)")
             let hasTrashColumn = false
             for (let index = 0; index < categoryColumns.rows.length; index += 1) {
@@ -64,6 +66,13 @@ TestCase {
             compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_state_mappings'").rows.length, 1)
             compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_members'").rows.length, 1)
             compare(tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'provider_task_links'").rows.length, 1)
+            const workflowStatuses = tx.executeSql("SELECT id, is_completed FROM workflow_statuses WHERE workspace_id = 'workspace-4leaflabs' ORDER BY position")
+            compare(workflowStatuses.rows.length, 5)
+            compare(workflowStatuses.rows.item(0).id, "backlog")
+            compare(workflowStatuses.rows.item(4).id, "completed")
+            compare(workflowStatuses.rows.item(4).is_completed, 1)
+            compare(tx.executeSql("SELECT status FROM tasks WHERE id = 'legacy-task'").rows.item(0).status, "completed")
+            compare(tx.executeSql("SELECT status FROM status_events WHERE id = 'legacy-event'").rows.item(0).status, "completed")
         })
     }
 }

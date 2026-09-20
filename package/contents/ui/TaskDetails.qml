@@ -458,7 +458,7 @@ FocusScope {
 
                 PlasmaComponents.Label {
                     Layout.fillWidth: true
-                    text: root.task ? i18n("Status: %1", statusField.currentValue.replace("_", " ")) : ""
+                    text: root.task ? i18n("Status: %1", root.board.statusLabel(statusField.currentValue)) : ""
                     color: Kirigami.Theme.disabledTextColor
                 }
 
@@ -544,7 +544,9 @@ FocusScope {
                     PlasmaComponents.ComboBox {
                         id: statusField
                         Layout.fillWidth: true
-                        model: ["backlog", "ready", "in_progress", "blocked", "completed"]
+                        model: root.board.workflowStatuses
+                        textRole: "name"
+                        valueRole: "id"
                         Accessible.name: i18n("Task status")
                     }
                 }
@@ -861,7 +863,7 @@ FocusScope {
 
                     PlasmaComponents.Label {
                         Layout.fillWidth: true
-                        text: root.board.formatTimestamp(modelData.occurred_at_utc) + ": " + modelData.status.replace("_", " ")
+                        text: root.board.formatTimestamp(modelData.occurred_at_utc) + ": " + root.board.statusLabel(modelData.status)
                             + (modelData.manually_edited ? i18n(" (corrected)") : "")
                         wrapMode: Text.Wrap
                     }
@@ -1139,7 +1141,9 @@ FocusScope {
             PlasmaComponents.ComboBox {
                 id: statusEventField
                 Layout.fillWidth: true
-                model: ["backlog", "ready", "in_progress", "blocked", "completed"]
+                model: root.board.workflowStatuses
+                textRole: "name"
+                valueRole: "id"
                 Accessible.name: i18n("Status event status")
             }
 

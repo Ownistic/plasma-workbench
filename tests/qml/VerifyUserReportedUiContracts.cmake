@@ -17,6 +17,7 @@ read_source("package/contents/ui/YearHeatmap.qml" year_heatmap)
 read_source("package/contents/ui/SettingsPage.qml" settings_page)
 read_source("package/contents/ui/WorkbenchSettingsPage.qml" workbench_settings_page)
 read_source("package/contents/ui/PlaneSettings.qml" plane_settings)
+read_source("package/contents/ui/WorkflowStatusSettings.qml" workflow_status_settings)
 read_source("package/contents/ui/ConfigGeneral.qml" config_general)
 read_source("package/contents/config/main.xml" config_xml)
 
@@ -50,6 +51,12 @@ if(NOT reports_view MATCHES "Time across all workbenches" OR NOT settings_page M
 endif()
 if(NOT plane_settings MATCHES "categoryMappingRow\\.model\\.id" OR NOT plane_settings MATCHES "onModelChanged:[ \t]*restoreSavedMapping" OR NOT plane_settings MATCHES "Changes save immediately to this workbench")
     message(FATAL_ERROR "Category mappings must save the selected category and make that behavior explicit")
+endif()
+if(NOT todo_board MATCHES "workflowStatuses" OR NOT plane_settings MATCHES "root\\.board\\.workflowStatuses" OR NOT workflow_status_settings MATCHES "createWorkflowStatus")
+    message(FATAL_ERROR "Workbench workflows must drive local and provider status mapping controls")
+endif()
+if(NOT plane_settings MATCHES "existingMapping \\? existingMapping\\.localStatus : defaultStatus" OR NOT plane_settings MATCHES "function saveStateMapping")
+    message(FATAL_ERROR "Plane state mappings must preserve saved choices when metadata is refreshed and report save failures")
 endif()
 
 # Report visualizations must retain every approved entry point and preserve

@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls as Controls
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
@@ -134,6 +133,33 @@ ColumnLayout {
         } catch (error) {
             failure = true
             message = error.message || i18n("Could not save the category mapping.")
+        }
+    }
+
+    function saveStateMapping(row, localStatus, isOutbound) {
+        try {
+            Database.saveProviderStateMapping({
+                workspaceId: board.selectedWorkspaceId, provider: "plane", projectId: row.projectId,
+                remoteStateId: row.remoteStateId, remoteStateName: row.remoteStateName,
+                localStatus: localStatus, isOutbound: isOutbound
+            })
+            const savedMappings = Database.listProviderStateMappings(board.selectedWorkspaceId, "plane", row.projectId)
+            stateRows = stateRows.map(function(currentRow) {
+                if (currentRow.projectId !== row.projectId) {
+                    return currentRow
+                }
+                const saved = savedMappings.filter(function(mapping) {
+                    return mapping.remoteStateId === currentRow.remoteStateId
+                })[0]
+                return saved ? Object.assign({}, currentRow, {
+                    localStatus: saved.localStatus, isOutbound: saved.isOutbound
+                }) : currentRow
+            })
+            failure = false
+            message = i18n("Saved Plane state mapping for %1.", row.remoteStateName)
+        } catch (error) {
+            failure = true
+            message = error.message || i18n("Could not save the Plane state mapping.")
         }
     }
 
@@ -293,6 +319,21 @@ ColumnLayout {
         }
     }
 
+    Kirigami.Heading {
+        Layout.fillWidth: true
+        visible: root.stateRows.length > 0
+        level: 4
+        text: i18n("Plane state mappings")
+    }
+
+    PlasmaComponents.Label {
+        Layout.fillWidth: true
+        visible: root.stateRows.length > 0
+        wrapMode: Text.Wrap
+        color: Kirigami.Theme.disabledTextColor
+        text: i18n("Map each Plane state to a status in this workbench’s local workflow.")
+    }
+
     Repeater {
         model: root.stateRows
 
@@ -309,20 +350,19 @@ ColumnLayout {
             PlasmaComponents.ComboBox {
                 id: localStatusPicker
                 Layout.preferredWidth: Kirigami.Units.gridUnit * 11
-                model: ["backlog", "ready", "in_progress", "blocked", "completed"]
-                Component.onCompleted: currentIndex = model.indexOf(modelData.localStatus)
-                onActivated: Database.saveProviderStateMapping({ workspaceId: root.board.selectedWorkspaceId,
-                    provider: "plane", projectId: modelData.projectId, remoteStateId: modelData.remoteStateId,
-                    remoteStateName: modelData.remoteStateName, localStatus: currentValue, isOutbound: outboundState.checked })
+                model: root.board.workflowStatuses
+                textRole: "name"
+                valueRole: "id"
+                Component.onCompleted: currentIndex = indexOfValue(modelData.localStatus)
+                onModelChanged: currentIndex = indexOfValue(modelData.localStatus)
+                onActivated: root.saveStateMapping(modelData, currentValue, outboundState.checked)
             }
 
             PlasmaComponents.CheckBox {
                 id: outboundState
                 text: i18n("Use for push")
                 checked: modelData.isOutbound
-                onToggled: Database.saveProviderStateMapping({ workspaceId: root.board.selectedWorkspaceId,
-                    provider: "plane", projectId: modelData.projectId, remoteStateId: modelData.remoteStateId,
-                    remoteStateName: modelData.remoteStateName, localStatus: localStatusPicker.currentValue, isOutbound: checked })
+                onToggled: root.saveStateMapping(modelData, localStatusPicker.currentValue, checked)
             }
         }
     }
@@ -365,18 +405,22 @@ ColumnLayout {
                 for (let index = 0; index < states.length; ++index) {
                     const state = states[index]
                     const group = String(state.group || "").toLowerCase()
-                    const status = group === "completed" || group === "cancelled" ? "completed"
+                    const defaultStatus = group === "completed" || group === "cancelled" ? "completed"
                         : group === "started" ? "in_progress" : group === "unstarted" ? "ready" : "backlog"
-                    let outbound = false
+                    const existingMapping = existing.filter(function(mapping) {
+                        return mapping.remoteStateId === state.id
+                    })[0]
+                    const localStatus = existingMapping ? existingMapping.localStatus : defaultStatus
+                    let outbound = existingMapping ? existingMapping.isOutbound : false
                     for (let mappingIndex = 0; mappingIndex < existing.length; ++mappingIndex) {
                         outbound = outbound || (existing[mappingIndex].remoteStateId === state.id && existing[mappingIndex].isOutbound)
                     }
-                    if (!outbound && !existing.some(function(mapping) { return mapping.localStatus === status && mapping.isOutbound })) {
+                    if (!existingMapping && !outbound && !existing.some(function(mapping) { return mapping.localStatus === localStatus && mapping.isOutbound })) {
                         outbound = true
                     }
                     Database.saveProviderStateMapping({ workspaceId: root.board.selectedWorkspaceId,
                         provider: "plane", projectId: projectId, remoteStateId: state.id, remoteStateName: state.name || state.id,
-                        localStatus: status, isOutbound: outbound })
+                        localStatus: localStatus, isOutbound: outbound })
                 }
                 const project = root.projects.filter(function(candidate) { return candidate.id === projectId })[0]
                 const refreshed = Database.listProviderStateMappings(root.board.selectedWorkspaceId, "plane", projectId)

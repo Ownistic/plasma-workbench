@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.components as PlasmaComponents
 
@@ -8,7 +7,6 @@ Item {
 
     property alias cfg_firstDayOfWeek: firstDay.currentValue
     property alias cfg_reportTimezone: timezone.text
-    property alias cfg_defaultStatusFilter: defaultStatuses.text
     property alias cfg_showArchivedTasks: showArchived.checked
     property alias cfg_use24HourTime: use24HourTime.checked
     property alias cfg_allowConcurrentTimers: allowConcurrentTimers.checked
@@ -36,12 +34,6 @@ Item {
             id: timezone
             Kirigami.FormData.label: i18n("Report timezone:")
             placeholderText: i18n("System timezone")
-        }
-
-        PlasmaComponents.TextField {
-            id: defaultStatuses
-            Kirigami.FormData.label: i18n("Default status filters:")
-            placeholderText: i18n("backlog,ready,in_progress,blocked")
         }
 
         PlasmaComponents.CheckBox {

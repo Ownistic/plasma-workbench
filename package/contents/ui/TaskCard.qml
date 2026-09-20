@@ -78,9 +78,9 @@ Kirigami.AbstractCard {
                 Layout.fillWidth: true
 
                 PlasmaComponents.Label {
-                    text: root.task.status.replace("_", " ")
+                    text: root.task.statusName || root.task.status.replace("_", " ")
                     color: Kirigami.Theme.disabledTextColor
-                    Accessible.name: i18n("Status: %1", root.task.status.replace("_", " "))
+                    Accessible.name: i18n("Status: %1", root.task.statusName || root.task.status.replace("_", " "))
                 }
 
                 PlasmaComponents.Label {

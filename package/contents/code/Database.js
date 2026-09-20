@@ -9,7 +9,6 @@ const POSITION_GAP = 1024
 const POSITION_OFFSET = 1000000000
 const TRASH_RETENTION_DAYS = 30
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
-const STATUSES = ["backlog", "ready", "in_progress", "blocked", "completed"]
 
 let databaseName = DATABASE_ID
 let database
@@ -82,11 +81,8 @@ function requireTimezoneId(value) {
     return timezoneId
 }
 
-function requireStatus(status) {
-    if (STATUSES.indexOf(status) === -1) {
-        fail("The task status is invalid.")
-    }
-    return status
+function requireStatusId(status) {
+    return normalizedText(status, "Task status", 100)
 }
 
 function requireProvider(value) {
@@ -229,6 +225,54 @@ function activeCategoryById(tx, categoryId) {
         fail("The category is in the trash.")
     }
     return category
+}
+
+function workflowStatusRecord(row) {
+    return {
+        id: row.id, name: row.name, isCompleted: row.is_completed === 1, position: row.position,
+        workspaceId: row.workspace_id, createdAtUtc: row.created_at_utc, updatedAtUtc: row.updated_at_utc
+    }
+}
+
+function workflowStatusById(tx, workspaceId, statusId) {
+    const status = first(tx.executeSql(
+        "SELECT * FROM workflow_statuses WHERE workspace_id = ? AND id = ?", [workspaceId, statusId]
+    ))
+    if (!status) {
+        fail("The task status is not defined for this workbench.")
+    }
+    return status
+}
+
+function requireStatusForWorkspace(tx, workspaceId, statusId) {
+    statusId = requireStatusId(statusId)
+    workflowStatusById(tx, workspaceId, statusId)
+    return statusId
+}
+
+function isCompletedStatusForTask(tx, taskId, statusId) {
+    const row = first(tx.executeSql(
+        "SELECT workflow_statuses.is_completed FROM tasks JOIN categories ON categories.id = tasks.category_id " +
+        "JOIN workflow_statuses ON workflow_statuses.workspace_id = categories.workspace_id AND workflow_statuses.id = ? " +
+        "WHERE tasks.id = ?", [statusId, taskId]
+    ))
+    if (!row) {
+        fail("The task status is not defined for this workbench.")
+    }
+    return row.is_completed === 1
+}
+
+function assertTaskWorkflowStatusesForWorkspace(tx, taskId, workspaceId) {
+    const invalid = first(tx.executeSql(
+        "SELECT 1 FROM status_events WHERE task_id = ? AND (NOT EXISTS " +
+        "(SELECT 1 FROM workflow_statuses WHERE workspace_id = ? AND id = status_events.status) " +
+        "OR (previous_status IS NOT NULL AND NOT EXISTS (SELECT 1 FROM workflow_statuses " +
+        "WHERE workspace_id = ? AND id = status_events.previous_status))) LIMIT 1",
+        [taskId, workspaceId, workspaceId]
+    ))
+    if (invalid) {
+        fail("All task status history must be defined for the destination workbench.")
+    }
 }
 
 function trashExpiryCutoff(currentUtc) {
@@ -429,7 +473,7 @@ function reconcileStatusHistory(tx, taskId) {
     const current = events[events.length - 1]
     tx.executeSql(
         "UPDATE tasks SET status = ?, completed_at_utc = ?, updated_at_utc = ? WHERE id = ?",
-        [previousStatus, previousStatus === "completed" ? current.occurred_at_utc : null, nowUtc(), taskId]
+        [previousStatus, isCompletedStatusForTask(tx, taskId, previousStatus) ? current.occurred_at_utc : null, nowUtc(), taskId]
     )
     return { status: previousStatus, occurredAtUtc: current.occurred_at_utc }
 }
@@ -516,7 +560,50 @@ function createWorkspace(input) {
             "INSERT INTO workspaces (id, name, position, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?)",
             [workspace.id, workspace.name, workspace.position, workspace.created_at_utc, workspace.updated_at_utc]
         )
+        const defaults = [
+            ["backlog", "Backlog", 0], ["ready", "Ready", 0], ["in_progress", "In progress", 0],
+            ["blocked", "Blocked", 0], ["completed", "Completed", 1]
+        ]
+        for (let index = 0; index < defaults.length; index += 1) {
+            tx.executeSql(
+                "INSERT INTO workflow_statuses (workspace_id, id, name, is_completed, position, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [workspace.id, defaults[index][0], defaults[index][1], defaults[index][2], (index + 1) * POSITION_GAP, timestamp, timestamp]
+            )
+        }
         return workspace
+    })
+}
+
+function listWorkflowStatuses(workspaceId) {
+    workspaceId = requireId(workspaceId, "Workspace ID")
+    return read(function(tx) {
+        workspaceById(tx, workspaceId)
+        return rows(tx.executeSql(
+            "SELECT * FROM workflow_statuses WHERE workspace_id = ? ORDER BY position, name, id", [workspaceId]
+        )).map(workflowStatusRecord)
+    })
+}
+
+function createWorkflowStatus(input) {
+    input = input || {}
+    const workspaceId = requireId(input.workspaceId, "Workspace ID")
+    const name = normalizedText(input.name, "Status name", 100)
+    const isCompleted = input.isCompleted === true ? 1 : 0
+    return write(function(tx) {
+        workspaceById(tx, workspaceId)
+        const timestamp = nowUtc()
+        const status = {
+            id: newId(), workspaceId: workspaceId, name: name, isCompleted: isCompleted,
+            position: nextPosition(tx, "workflow_statuses", "WHERE workspace_id = ?", [workspaceId]),
+            createdAtUtc: timestamp, updatedAtUtc: timestamp
+        }
+        tx.executeSql(
+            "INSERT INTO workflow_statuses (workspace_id, id, name, is_completed, position, created_at_utc, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [status.workspaceId, status.id, status.name, status.isCompleted, status.position, status.createdAtUtc, status.updatedAtUtc]
+        )
+        return workflowStatusRecord(first(tx.executeSql(
+            "SELECT * FROM workflow_statuses WHERE workspace_id = ? AND id = ?", [workspaceId, status.id]
+        )))
     })
 }
 
@@ -646,11 +733,12 @@ function saveProviderStateMapping(input) {
     const provider = requireProvider(input.provider)
     const projectId = requireId(input.projectId, "Project ID")
     const remoteStateId = normalizedText(input.remoteStateId, "Remote state ID", 200)
-    const localStatus = requireStatus(input.localStatus)
+    const localStatus = requireStatusId(input.localStatus)
     const isOutbound = input.isOutbound === true ? 1 : 0
     const remoteStateName = input.remoteStateName === undefined ? "" : String(input.remoteStateName)
     return write(function(tx) {
         workspaceById(tx, workspaceId)
+        requireStatusForWorkspace(tx, workspaceId, localStatus)
         const timestamp = nowUtc()
         if (isOutbound) {
             tx.executeSql("UPDATE provider_state_mappings SET is_outbound = 0, updated_at_utc = ? WHERE workspace_id = ? AND provider = ? AND project_id = ? AND local_status = ?", [timestamp, workspaceId, provider, projectId, localStatus])
@@ -826,6 +914,18 @@ function updateCategory(input) {
         ))) {
             fail("A provider-mapped category cannot move to a different workspace.")
         }
+        if (workspace.id !== current.workspace_id) {
+            const invalid = first(tx.executeSql(
+                "SELECT 1 FROM status_events JOIN tasks ON tasks.id = status_events.task_id WHERE tasks.category_id = ? AND " +
+                "(NOT EXISTS (SELECT 1 FROM workflow_statuses WHERE workspace_id = ? AND id = status_events.status) " +
+                "OR (status_events.previous_status IS NOT NULL AND NOT EXISTS (SELECT 1 FROM workflow_statuses " +
+                "WHERE workspace_id = ? AND id = status_events.previous_status))) LIMIT 1",
+                [categoryId, workspace.id, workspace.id]
+            ))
+            if (invalid) {
+                fail("All task status history must be defined for the destination workbench.")
+            }
+        }
         const position = workspace.id === current.workspace_id ? current.position
             : nextPosition(tx, "categories", "WHERE workspace_id = ? AND trashed_at_utc IS NULL", [workspace.id])
         const timestamp = nowUtc()
@@ -913,7 +1013,7 @@ function listTasks(filter) {
     const showArchived = filter.showArchived === true
     const workspaceId = filter.workspaceId || ""
     for (let index = 0; index < statuses.length; index += 1) {
-        requireStatus(statuses[index])
+        requireStatusId(statuses[index])
     }
     return read(function(tx) {
         const clauses = ["categories.trashed_at_utc IS NULL", showArchived ? "1 = 1" : "tasks.archived_at_utc IS NULL"]
@@ -922,6 +1022,9 @@ function listTasks(filter) {
             workspaceById(tx, workspaceId)
             clauses.push("categories.workspace_id = ?")
             parameters.push(workspaceId)
+            for (let index = 0; index < statuses.length; index += 1) {
+                requireStatusForWorkspace(tx, workspaceId, statuses[index])
+            }
         }
         if (statuses.length > 0) {
             clauses.push("tasks.status IN (" + statuses.map(function() { return "?" }).join(", ") + ")")
@@ -932,11 +1035,12 @@ function listTasks(filter) {
         return rows(tx.executeSql(
             "SELECT tasks.id AS taskId, tasks.category_id AS categoryId, categories.workspace_id AS workspaceId, " +
             "categories.name AS categoryName, " +
-            "categories.color AS categoryColor, categories.collapsed AS categoryCollapsed, tasks.title, tasks.details, " +
+            "categories.color AS categoryColor, categories.collapsed AS categoryCollapsed, workflow_statuses.name AS statusName, tasks.title, tasks.details, " +
             "tasks.status, tasks.position, tasks.archived_at_utc AS archivedAtUtc, " +
             "tasks.tracked_seconds AS trackedSeconds, " +
             "active_session.started_at_utc AS activeStartedAt " +
             "FROM tasks JOIN categories ON categories.id = tasks.category_id " +
+            "LEFT JOIN workflow_statuses ON workflow_statuses.workspace_id = categories.workspace_id AND workflow_statuses.id = tasks.status " +
             "LEFT JOIN work_sessions AS active_session ON active_session.task_id = tasks.id AND active_session.ended_at_utc IS NULL " +
             "WHERE " + clauses.join(" AND ") +
             " ORDER BY categories.position, tasks.position, tasks.created_at_utc, tasks.id",
@@ -949,11 +1053,12 @@ function getTask(taskId) {
     taskId = requireId(taskId, "Task ID")
     return read(function(tx) {
         const task = first(tx.executeSql(
-            "SELECT tasks.*, categories.name AS category_name, categories.color AS category_color, " +
+            "SELECT tasks.*, categories.name AS category_name, categories.color AS category_color, workflow_statuses.name AS statusName, " +
             "tasks.tracked_seconds AS trackedSeconds, " +
             "(SELECT started_at_utc FROM work_sessions WHERE task_id = tasks.id AND ended_at_utc IS NULL) AS activeStartedAt " +
-            "FROM tasks " +
-            "JOIN categories ON categories.id = tasks.category_id WHERE tasks.id = ?",
+            "FROM tasks JOIN categories ON categories.id = tasks.category_id " +
+            "LEFT JOIN workflow_statuses ON workflow_statuses.workspace_id = categories.workspace_id AND workflow_statuses.id = tasks.status " +
+            "WHERE tasks.id = ?",
             [taskId]
         ))
         if (!task) {
@@ -1078,14 +1183,14 @@ function createTask(input) {
     if (codePointLength(details) > 20000) {
         fail("Task details must contain no more than 20,000 characters.")
     }
-    const status = requireStatus(input.status || "backlog")
     return write(function(tx) {
-        activeCategoryById(tx, categoryId)
+        const category = activeCategoryById(tx, categoryId)
+        const status = requireStatusForWorkspace(tx, category.workspace_id, input.status || "backlog")
         const timestamp = nowUtc()
         const task = {
             id: newId(), categoryId: categoryId, title: title, details: details, status: status,
             position: nextPosition(tx, "tasks", "WHERE category_id = ?", [categoryId]),
-            archivedAtUtc: null, completedAtUtc: status === "completed" ? timestamp : null,
+            archivedAtUtc: null, completedAtUtc: workflowStatusById(tx, category.workspace_id, status).is_completed === 1 ? timestamp : null,
             createdAtUtc: timestamp, updatedAtUtc: timestamp
         }
         tx.executeSql(
@@ -1124,14 +1229,18 @@ function saveTask(input) {
     const title = normalizedText(input.title, "Task title", 200)
     const details = typeof input.details === "string" ? input.details : ""
     const categoryId = requireId(input.categoryId, "Category ID")
-    const status = requireStatus(input.status)
+    const status = requireStatusId(input.status)
     if (codePointLength(details) > 20000) {
         fail("Task details must contain no more than 20,000 characters.")
     }
     return write(function(tx) {
         const task = taskById(tx, taskId)
-        activeCategoryById(tx, task.category_id)
-        activeCategoryById(tx, categoryId)
+        const currentCategory = activeCategoryById(tx, task.category_id)
+        const category = activeCategoryById(tx, categoryId)
+        requireStatusForWorkspace(tx, category.workspace_id, status)
+        if (currentCategory.workspace_id !== category.workspace_id) {
+            assertTaskWorkflowStatusesForWorkspace(tx, taskId, category.workspace_id)
+        }
         const timestamp = nowUtc()
         let position = task.position
         if (task.category_id !== categoryId) {
@@ -1149,7 +1258,7 @@ function saveTask(input) {
                 [newId(), taskId, task.status, status, timestamp, nextStatusSequence(tx, taskId), timestamp, timestamp]
             )
             const current = reconcileStatusHistory(tx, taskId)
-            if (current.status === "completed") {
+            if (isCompletedStatusForTask(tx, taskId, current.status)) {
                 closeActiveSessionForTask(tx, taskId, timestamp)
             }
         }
@@ -1166,11 +1275,12 @@ function moveTask(input) {
     return write(function(tx) {
         const task = taskById(tx, taskId)
         activeCategoryById(tx, task.category_id)
-        activeCategoryById(tx, targetCategoryId)
+        const targetCategory = activeCategoryById(tx, targetCategoryId)
         if (targetTaskId === taskId) {
             return task.position
         }
         assertTaskMoveProviderCompatible(tx, task, targetCategoryId)
+        assertTaskWorkflowStatusesForWorkspace(tx, taskId, targetCategory.workspace_id)
         const position = positionForMove(tx, targetCategoryId, taskId, targetTaskId, placement)
         tx.executeSql(
             "UPDATE tasks SET category_id = ?, position = ?, updated_at_utc = ? WHERE id = ?",
@@ -1207,9 +1317,11 @@ function changeStatus(taskId, status) {
         fail("Use status-history correction to change a historical status timestamp.")
     }
     taskId = requireId(taskId, "Task ID")
-    status = requireStatus(status)
+    status = requireStatusId(status)
     return write(function(tx) {
         const task = taskById(tx, taskId)
+        const category = activeCategoryById(tx, task.category_id)
+        requireStatusForWorkspace(tx, category.workspace_id, status)
         if (task.status === status) {
             return null
         }
@@ -1221,7 +1333,7 @@ function changeStatus(taskId, status) {
             [eventId, taskId, task.status, status, timestamp, nextStatusSequence(tx, taskId), timestamp, timestamp]
         )
         const current = reconcileStatusHistory(tx, taskId)
-        if (current.status === "completed") {
+        if (isCompletedStatusForTask(tx, taskId, current.status)) {
             closeActiveSessionForTask(tx, taskId, timestamp)
         }
         return eventId
@@ -1454,19 +1566,22 @@ function listStatusEvents(taskId) {
 function updateStatusEvent(input) {
     input = input || {}
     const eventId = requireId(input.id, "Status event ID")
-    const status = requireStatus(input.status)
+    const status = requireStatusId(input.status)
     const occurredAtUtc = requireUtcInstant(input.occurredAtUtc, "Status event time")
     return write(function(tx) {
         const event = first(tx.executeSql("SELECT * FROM status_events WHERE id = ?", [eventId]))
         if (!event) {
             fail("The status event does not exist.")
         }
+        const task = taskById(tx, event.task_id)
+        const category = activeCategoryById(tx, task.category_id)
+        requireStatusForWorkspace(tx, category.workspace_id, status)
         tx.executeSql(
             "UPDATE status_events SET status = ?, occurred_at_utc = ?, manually_edited = 1, updated_at_utc = ? WHERE id = ?",
             [status, occurredAtUtc, nowUtc(), eventId]
         )
         const current = reconcileStatusHistory(tx, event.task_id)
-        if (current.status === "completed") {
+        if (isCompletedStatusForTask(tx, event.task_id, current.status)) {
             closeActiveSessionForTask(tx, event.task_id, nowUtc())
         }
     })
@@ -1485,7 +1600,7 @@ function deleteStatusEvent(eventId) {
         }
         tx.executeSql("DELETE FROM status_events WHERE id = ?", [eventId])
         const current = reconcileStatusHistory(tx, event.task_id)
-        if (current.status === "completed") {
+        if (isCompletedStatusForTask(tx, event.task_id, current.status)) {
             closeActiveSessionForTask(tx, event.task_id, nowUtc())
         }
     })

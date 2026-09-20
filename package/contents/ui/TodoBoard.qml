@@ -19,6 +19,7 @@ Item {
     property var selectedStatuses: []
     property alias categories: categoryModel
     property string selectedWorkspaceId: ""
+    property var workflowStatuses: []
     property int workspaceConnectionRevision: 0
     readonly property var selectedWorkspaceProvider: {
         workspaceConnectionRevision
@@ -238,6 +239,12 @@ Item {
     }
 
     function reloadWorkspace() {
+        root.workflowStatuses = root.selectedWorkspaceId
+            ? Database.listWorkflowStatuses(root.selectedWorkspaceId) : []
+        const validStatusIds = root.workflowStatuses.map(function(status) { return status.id })
+        root.selectedStatuses = root.selectedStatuses.filter(function(status) {
+            return validStatusIds.indexOf(status) !== -1
+        })
         const tasks = Database.listTasks({
             statuses: root.selectedStatuses,
             showArchived: root.plasmoidConfiguration.showArchivedTasks,
@@ -295,8 +302,23 @@ Item {
     function selectWorkspace(workspaceId) {
         if (workspaceId && workspaceId !== root.selectedWorkspaceId) {
             root.selectedWorkspaceId = workspaceId
+            root.selectedStatuses = []
             root.reloadWorkspace()
         }
+    }
+
+    function refreshWorkflowStatuses() {
+        root.workflowStatuses = root.selectedWorkspaceId
+            ? Database.listWorkflowStatuses(root.selectedWorkspaceId) : []
+    }
+
+    function statusLabel(statusId) {
+        for (let index = 0; index < root.workflowStatuses.length; ++index) {
+            if (root.workflowStatuses[index].id === statusId) {
+                return root.workflowStatuses[index].name
+            }
+        }
+        return String(statusId || "").replace(/_/g, " ")
     }
 
     function toggleStatus(status) {
@@ -735,10 +757,6 @@ Item {
             return WorkbenchTime.TimeMath.isValidTimeZone(timezoneId)
         })
         Database.initialize()
-        const configuredStatuses = root.plasmoidConfiguration.defaultStatusFilter.split(",")
-        root.selectedStatuses = configuredStatuses.filter(function(status) {
-            return ["backlog", "ready", "in_progress", "blocked", "completed"].indexOf(status) !== -1
-        })
         root.reload()
     }
 
@@ -970,15 +988,15 @@ Item {
             spacing: Kirigami.Units.smallSpacing
 
             Repeater {
-                model: ["backlog", "ready", "in_progress", "blocked", "completed"]
+                model: root.workflowStatuses
 
                 delegate: PlasmaComponents.Button {
-                    required property string modelData
-                    text: modelData.replace("_", " ")
+                    required property var modelData
+                    text: modelData.name
                     checkable: true
-                    checked: root.selectedStatuses.indexOf(modelData) !== -1
-                    Accessible.name: i18n("Filter by %1", modelData.replace("_", " "))
-                    onClicked: root.toggleStatus(modelData)
+                    checked: root.selectedStatuses.indexOf(modelData.id) !== -1
+                    Accessible.name: i18n("Filter by %1", modelData.name)
+                    onClicked: root.toggleStatus(modelData.id)
                 }
             }
 
@@ -1696,7 +1714,10 @@ Item {
             PlasmaComponents.ComboBox {
                 id: taskStatus
                 Layout.fillWidth: true
-                model: ["backlog", "ready", "in_progress", "blocked", "completed"]
+                model: root.workflowStatuses
+                textRole: "name"
+                valueRole: "id"
+                Accessible.name: i18n("Task status")
             }
 
             PlasmaComponents.TextArea {
