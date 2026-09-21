@@ -22,6 +22,11 @@ private slots:
     void formatsUtcForLocal();
     void rejectsInvalidInput();
     void clampsToReportRange();
+    void rejectsInvalidTimeZonesAndUtcInstants();
+    void rejectsDisjointAndMalformedIntervals();
+    void returnsSystemTimeZoneId();
+    void acceptsWholeSecondUtcAndRejectsInvalidWeekStart();
+    void rejectsUnrepresentableCalendarRanges();
 };
 
 void TimeMathTest::splitsCrossMidnight()
@@ -224,6 +229,85 @@ void TimeMathTest::clampsToReportRange()
     QCOMPARE(segment.value(QStringLiteral("endUtc")).toString(), QStringLiteral("2024-01-02T00:00:00.000Z"));
     QCOMPARE(segment.value(QStringLiteral("localDate")).toString(), QStringLiteral("2024-01-01"));
     QCOMPARE(segment.value(QStringLiteral("durationSeconds")).toLongLong(), 7200LL);
+}
+
+void TimeMathTest::rejectsInvalidTimeZonesAndUtcInstants()
+{
+    TimeMath timeMath;
+
+    QVERIFY(!timeMath.localPartsForUtc(QStringLiteral("2024-01-01T00:00:00.000Z"),
+                                       QStringLiteral("Mars/Olympus"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.localPartsForUtc(QStringLiteral("2024-01-01T00:00:00"),
+                                       QStringLiteral("Etc/UTC"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.possibleUtcInstantsForLocal(2024, 2, 30, 12, 0, 0, 0,
+                                                   QStringLiteral("Etc/UTC"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.possibleUtcInstantsForLocal(2024, 2, 1, 12, 0, 0, 0,
+                                                   QStringLiteral("Mars/Olympus"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.dayRange(2024, 1, 1, QStringLiteral("Mars/Olympus"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.monthRange(2024, 1, QStringLiteral("Mars/Olympus"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.yearRange(2024, QStringLiteral("Mars/Olympus"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.trailingYearRange(2024, 1, 1, QStringLiteral("Mars/Olympus"))
+                 .value(QStringLiteral("valid")).toBool());
+}
+
+void TimeMathTest::rejectsDisjointAndMalformedIntervals()
+{
+    TimeMath timeMath;
+    QVERIFY(timeMath.splitInterval(
+        QStringLiteral("2024-01-01T00:00:00.000Z"),
+        QStringLiteral("2024-01-01T01:00:00.000Z"),
+        QStringLiteral("2024-01-02T00:00:00.000Z"),
+        QStringLiteral("2024-01-03T00:00:00.000Z"),
+        QStringLiteral("Etc/UTC")).isEmpty());
+    QVERIFY(timeMath.splitInterval(
+        QStringLiteral("not-a-utc-instant"),
+        QStringLiteral("2024-01-01T01:00:00.000Z"),
+        QStringLiteral("2024-01-01T00:00:00.000Z"),
+        QStringLiteral("2024-01-02T00:00:00.000Z"),
+        QStringLiteral("Etc/UTC")).isEmpty());
+}
+
+void TimeMathTest::returnsSystemTimeZoneId()
+{
+    TimeMath timeMath;
+    QVERIFY(!timeMath.systemTimeZoneId().isEmpty());
+    QVERIFY(timeMath.isValidTimeZone(timeMath.systemTimeZoneId()));
+}
+
+void TimeMathTest::acceptsWholeSecondUtcAndRejectsInvalidWeekStart()
+{
+    TimeMath timeMath;
+    QCOMPARE(timeMath.localDateForUtc(QStringLiteral("2024-01-01T23:30:00Z"),
+                                      QStringLiteral("Europe/Berlin")),
+             QStringLiteral("2024-01-02"));
+    QVERIFY(!timeMath.formatUtcForLocal(QStringLiteral("not-a-utc-instant"),
+                                        QStringLiteral("Etc/UTC"), true)
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.weekRange(2024, 1, 1, QStringLiteral("Etc/UTC"), 0)
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(!timeMath.weekRange(2024, 1, 1, QStringLiteral("Etc/UTC"), 8)
+                 .value(QStringLiteral("valid")).toBool());
+}
+
+void TimeMathTest::rejectsUnrepresentableCalendarRanges()
+{
+    TimeMath timeMath;
+    QVERIFY(!timeMath.yearRange(0, QStringLiteral("Etc/UTC"))
+                 .value(QStringLiteral("valid")).toBool());
+    QVERIFY(timeMath.trailingYearRange(1, 1, 1, QStringLiteral("Etc/UTC"))
+                .value(QStringLiteral("valid")).toBool());
+
+    if (timeMath.isValidTimeZone(QStringLiteral("Pacific/Apia"))) {
+        QVERIFY(!timeMath.dayRange(2011, 12, 30, QStringLiteral("Pacific/Apia"))
+                     .value(QStringLiteral("valid")).toBool());
+    }
 }
 
 QTEST_APPLESS_MAIN(TimeMathTest)

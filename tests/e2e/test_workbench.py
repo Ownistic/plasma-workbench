@@ -409,6 +409,62 @@ class WorkbenchEndToEndTest(unittest.TestCase):
         self.element("Assign Plane task to Mila Chen")
         self.capture_screenshot("plane-owner-picker")
 
+    def test_task_details_edits_persist_to_the_board(self) -> None:
+        task_title = "Edit task details"
+        updated_title = "Edited task details"
+        self.create_category(CATEGORY_NAME)
+        self.create_task(task_title, CATEGORY_NAME)
+
+        task_card = self.wait.until(lambda _driver: self.visible_task_card(task_title))
+        assert isinstance(task_card, WebElement)
+        task_card.send_keys(Keys.ENTER)
+        title = self.wait.until(
+            conditions.presence_of_element_located((AppiumBy.NAME, "Task title"))
+        )
+        description = self.driver.find_element(AppiumBy.NAME, "Task description")
+        title.clear()
+        title.send_keys(updated_title)
+        description.clear()
+        description.send_keys("Updated through the accessible task details workflow.")
+        self.driver.find_element(AppiumBy.NAME, "Save task changes").click()
+
+        self.wait.until(lambda _driver: self.visible_task_card(updated_title))
+        self.assertFalse(self.visible_task_card(task_title))
+
+    def test_clear_status_filters_restores_hidden_task(self) -> None:
+        task_title = "Status filter task"
+        self.create_category(CATEGORY_NAME)
+        self.create_task(task_title, CATEGORY_NAME)
+
+        self.element("Filter by Ready").click()
+        self.wait.until(lambda _driver: not self.visible_task_card(task_title))
+        self.element("Clear status filters").click()
+        self.wait.until(lambda _driver: self.visible_task_card(task_title))
+
+    def test_active_timer_elapsed_text_refreshes_and_pauses(self) -> None:
+        task_title = "Elapsed timer task"
+        self.create_category(CATEGORY_NAME)
+        self.create_task(task_title, CATEGORY_NAME)
+
+        self.element(f"Start timer for {task_title}").click()
+        active_timer = self.wait.until(
+            conditions.presence_of_element_located(
+                (AppiumBy.XPATH, "//*[starts-with(@name, 'Timer active: ')]")
+            )
+        )
+        initial_elapsed = active_timer.get_attribute("name")
+        self.wait.until(
+            lambda _driver: self.driver.find_element(
+                AppiumBy.XPATH, "//*[starts-with(@name, 'Timer active: ')]"
+            ).get_attribute("name") != initial_elapsed
+        )
+        self.element(f"Pause timer for {task_title}").click()
+        self.wait.until(
+            conditions.invisibility_of_element_located(
+                (AppiumBy.XPATH, "//*[starts-with(@name, 'Timer active: ')]")
+            )
+        )
+
     def test_report_navigation_remains_bounded(self) -> None:
         self.create_category()
         self.create_task(category_index=2)

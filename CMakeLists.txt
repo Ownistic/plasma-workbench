@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 project(Workbench VERSION 0.1.0 LANGUAGES CXX)
 
 option(WORKBENCH_ENABLE_COVERAGE "Instrument native targets for gcov-compatible coverage" OFF)
+option(WORKBENCH_ENABLE_TEST_ADAPTERS "Compile test-only integration adapters into native modules" OFF)
 if(WORKBENCH_ENABLE_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         message(FATAL_ERROR "WORKBENCH_ENABLE_COVERAGE requires a GNU- or Clang-compatible compiler")

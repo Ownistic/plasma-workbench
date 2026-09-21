@@ -17,7 +17,7 @@ jobs:
           pacman -Syu --noconfirm --needed \
             cmake extra-cmake-modules git kpackage kirigami ninja \
             plasma-framework python python-pip qt6-base qt6-declarative \
-            qqc2-desktop-style
+            qqc2-desktop-style xorg-server-xvfb
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -27,7 +27,7 @@ jobs:
           .ci-venv/bin/pip install --upgrade pip
           .ci-venv/bin/pip install diff-cover gcovr
       - name: Configure coverage build
-        run: cmake -S . -B build-coverage -G Ninja -DWORKBENCH_ENABLE_COVERAGE=ON
+        run: cmake -S . -B build-coverage -G Ninja -DWORKBENCH_ENABLE_COVERAGE=ON -DWORKBENCH_ENABLE_TEST_ADAPTERS=ON
       - name: Run fast test gate
         run: cmake --build build-coverage --target fast-test
       - name: Validate matrix directly
@@ -39,6 +39,7 @@ jobs:
             --object-directory build-coverage \
             --filter 'src/' \
             --exclude 'tests/' \
+            --merge-mode-functions merge-use-line-0 \
             --cobertura-pretty \
             --output coverage.xml
       - name: Enforce changed native-line coverage

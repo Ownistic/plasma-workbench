@@ -25,6 +25,9 @@ if(TARGET KF6::Wallet)
 endif()
 
 target_include_directories(workbench_plane PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+if(WORKBENCH_ENABLE_TEST_ADAPTERS)
+    target_compile_definitions(workbench_plane PRIVATE WORKBENCH_TESTING_ADAPTERS=1)
+endif()
 set_target_properties(workbench_plane PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${WORKBENCH_PLANE_QML_BUILD_DIR}"
 )

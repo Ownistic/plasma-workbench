@@ -8,23 +8,33 @@ find_program(QMLLINT
     HINTS /usr/lib/qt6/bin
     REQUIRED
 )
+find_program(XVFB_RUN NAMES xvfb-run)
+
+set(QML_TEST_COMMAND ${QMLTESTRUNNER})
+set(QML_TEST_ENVIRONMENT "QT_QPA_PLATFORM=offscreen;XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
+if(XVFB_RUN)
+    set(QML_TEST_COMMAND ${XVFB_RUN} -a ${QMLTESTRUNNER})
+    set(QML_TEST_ENVIRONMENT "XDG_DATA_HOME=${CMAKE_BINARY_DIR}/test-data")
+endif()
 
 add_test(
     NAME DatabaseRepository
-    COMMAND ${QMLTESTRUNNER} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMAND ${QML_TEST_COMMAND} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}
 )
 set_tests_properties(DatabaseRepository PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    ENVIRONMENT "${QML_TEST_ENVIRONMENT}"
     LABELS "fast;integration;qml"
+    TIMEOUT 120
 )
 
 add_test(
     NAME CategoryDragE2E
-    COMMAND ${QMLTESTRUNNER} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/tst_category_drag.qml
+    COMMAND ${QML_TEST_COMMAND} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/tst_category_drag.qml
 )
 set_tests_properties(CategoryDragE2E PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    ENVIRONMENT "${QML_TEST_ENVIRONMENT}"
     LABELS "fast;integration;qml"
+    TIMEOUT 120
 )
 
 add_test(
@@ -58,11 +68,11 @@ set_tests_properties(UserReportedUiContracts PROPERTIES LABELS "fast;static;qml"
 
 add_test(
     NAME RepositoryBenchmark
-    COMMAND ${QMLTESTRUNNER} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark
+    COMMAND ${QML_TEST_COMMAND} -import ${CMAKE_BINARY_DIR}/qml -input ${CMAKE_CURRENT_SOURCE_DIR}/../benchmark
 )
 set_tests_properties(RepositoryBenchmark PROPERTIES
     DISABLED TRUE
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    ENVIRONMENT "${QML_TEST_ENVIRONMENT}"
     LABELS benchmark
 )
 

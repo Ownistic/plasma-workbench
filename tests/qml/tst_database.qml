@@ -50,6 +50,22 @@ TestCase {
         compare(Database.listCategories()[0].id, category.id)
     }
 
+    function test_activeTimerSurvivesRepositoryReinitialization() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Resume after restart")
+        const startedAtUtc = "2026-09-20T10:00:00.000Z"
+        const session = Database.startTimer(task.id, "Etc/UTC", startedAtUtc)
+
+        Database.initialize()
+
+        const active = Database.getActiveSessions()
+        compare(active.length, 1)
+        compare(active[0].id, session.id)
+        compare(active[0].task_id, task.id)
+        compare(active[0].started_at_utc, startedAtUtc)
+        compare(Database.listWorkSessions(task.id)[0].ended_at_utc, null)
+    }
+
     function test_workspacesScopeCategoriesAndTasks() {
         const initialWorkspace = Database.listWorkspaces()[0]
         const workWorkspace = Database.createWorkspace({ name: "Work" })
@@ -803,5 +819,91 @@ TestCase {
         compare(monthly.byWeek.length, 5)
         compare(yearly.totalSeconds, 0)
         compare(yearly.byDate.length, 365)
+    }
+
+    function test_archivingHidesTaskButRetainsSessionsAndHistory() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Archive me")
+        Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2026-09-20T09:00:00.000Z",
+            endedAtUtc: "2026-09-20T10:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+
+        Database.archiveTask(task.id)
+
+        compare(Database.listTasks().length, 0)
+        compare(Database.listTasks({ showArchived: true }).length, 1)
+        compare(Database.listTasks({ showArchived: true })[0].taskId, task.id)
+        compare(Database.listWorkSessions(task.id).length, 1)
+        compare(Database.getTask(task.id).statusEvents.length, 1)
+    }
+
+    function test_descriptionAcceptsLimitAndRejectsOneExtraCodePoint() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Long description")
+        const atLimit = Array(20001).join("x")
+
+        Database.saveTask({ id: task.id, title: task.title, details: atLimit,
+            categoryId: category.id, status: "ready" })
+        compare(Database.getTask(task.id).details.length, 20000)
+
+        assertThrows(function() {
+            Database.saveTask({ id: task.id, title: task.title, details: atLimit + "x",
+                categoryId: category.id, status: "ready" })
+        }, "20,000")
+        compare(Database.getTask(task.id).details.length, 20000)
+    }
+
+    function test_monthlyReportAggregatesPersistedSessions() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Monthly report")
+        Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2024-03-15T09:00:00.000Z",
+            endedAtUtc: "2024-03-15T10:30:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+
+        const report = Reports.monthlyReport(WorkbenchTime.TimeMath, {
+            year: 2024, month: 3, firstDayOfWeek: 1, timezoneId: "Etc/UTC",
+            currentUtc: "2024-03-31T23:59:59.000Z"
+        })
+        compare(report.totalSeconds, 5400)
+        const marchFifteenth = report.byDate.filter(function(bucket) {
+            return bucket.id === "2024-03-15"
+        })[0]
+        compare(marchFifteenth.seconds, 5400)
+        compare(report.byCategory[0].id, category.id)
+    }
+
+    function test_weekAndMonthReportsClipAtCalendarBoundaries() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Boundary report")
+        Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2024-03-31T23:00:00.000Z",
+            endedAtUtc: "2024-04-01T01:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+
+        const march = Reports.monthlyReport(WorkbenchTime.TimeMath, {
+            year: 2024, month: 3, timezoneId: "Etc/UTC", firstDayOfWeek: 1
+        })
+        const april = Reports.monthlyReport(WorkbenchTime.TimeMath, {
+            year: 2024, month: 4, timezoneId: "Etc/UTC", firstDayOfWeek: 1
+        })
+        compare(march.totalSeconds, 3600)
+        compare(april.totalSeconds, 3600)
+
+        const sundayWeek = Reports.weeklyReport(WorkbenchTime.TimeMath, {
+            year: 2024, month: 3, day: 31, timezoneId: "Etc/UTC", firstDayOfWeek: 7
+        })
+        const mondayWeek = Reports.weeklyReport(WorkbenchTime.TimeMath, {
+            year: 2024, month: 3, day: 31, timezoneId: "Etc/UTC", firstDayOfWeek: 1
+        })
+        compare(sundayWeek.totalSeconds, 7200)
+        compare(mondayWeek.totalSeconds, 3600)
     }
 }

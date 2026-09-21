@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QObject>
+#include <QByteArray>
+#include <QHash>
 #include <QPointer>
 #include <QQmlEngine>
 #include <QVariantMap>
@@ -56,6 +58,22 @@ public:
                                            const QString &workspace, const QString &projectId,
                                            const QString &path, const QVariantMap &fields = {}) const;
 
+    // Pure response decoder retained as a native test seam. It accepts no
+    // credentials, transport object, or QML-visible state.
+    static QVariantMap decodeResponseForTests(int networkError, int status,
+                                              const QByteArray &raw,
+                                              const QString &replyError,
+                                              const QString &operation);
+
+#ifdef WORKBENCH_TESTING_ADAPTERS
+    // Compiled only into test builds. It is not invokable from QML and never
+    // exists in the shipped module, so it cannot alter production credentials.
+    Q_INVOKABLE void setTokenForTests(const QString &connectionId, const QString &token);
+    Q_INVOKABLE void setResponseForTests(int networkError, int status, const QByteArray &body,
+                                         const QString &replyError = QString());
+    Q_INVOKABLE void setResponseQueueForTests(const QVariantList &responses);
+#endif
+
 signals:
     void completed(const QString &requestId, const QVariantMap &result);
     void lastErrorChanged();
@@ -73,4 +91,13 @@ private:
     QNetworkAccessManager *m_network;
     QString m_lastError;
     quint64 m_nextRequestId = 1;
+#ifdef WORKBENCH_TESTING_ADAPTERS
+    QHash<QString, QString> m_testTokens;
+    bool m_testResponseConfigured = false;
+    int m_testNetworkError = 0;
+    int m_testResponseStatus = 0;
+    QByteArray m_testResponseBody;
+    QString m_testReplyError;
+    QVariantList m_testResponses;
+#endif
 };

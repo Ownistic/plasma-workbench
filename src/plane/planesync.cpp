@@ -146,6 +146,11 @@ bool PlaneSync::hasToken(const QString &connectionId)
 
 QString PlaneSync::tokenFor(const QString &connectionId)
 {
+#ifdef WORKBENCH_TESTING_ADAPTERS
+    const auto testToken = m_testTokens.constFind(connectionId);
+    if (testToken != m_testTokens.cend())
+        return testToken.value();
+#endif
 #ifdef WORKBENCH_HAVE_KWALLET
     if (connectionId.trimmed().isEmpty()) {
         setLastError(QStringLiteral("A Plane connection ID is required."));
@@ -166,6 +171,32 @@ QString PlaneSync::tokenFor(const QString &connectionId)
     return {};
 #endif
 }
+
+#ifdef WORKBENCH_TESTING_ADAPTERS
+void PlaneSync::setTokenForTests(const QString &connectionId, const QString &token)
+{
+    if (token.isEmpty())
+        m_testTokens.remove(connectionId);
+    else
+        m_testTokens.insert(connectionId, token);
+}
+
+void PlaneSync::setResponseForTests(int networkError, int status, const QByteArray &body,
+                                    const QString &replyError)
+{
+    m_testResponseConfigured = true;
+    m_testNetworkError = networkError;
+    m_testResponseStatus = status;
+    m_testResponseBody = body;
+    m_testReplyError = replyError;
+}
+
+void PlaneSync::setResponseQueueForTests(const QVariantList &responses)
+{
+    m_testResponses = responses;
+    m_testResponseConfigured = !m_testResponses.isEmpty();
+}
+#endif
 
 QVariantMap PlaneSync::normalizedFields(const QVariantMap &fields, QString *error)
 {
@@ -237,6 +268,29 @@ QString PlaneSync::begin(const QString &operation, const QString &connectionId, 
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QNetworkReply *reply = nullptr;
     const QByteArray body = QJsonDocument::fromVariant(preview.value(QStringLiteral("body")).toMap()).toJson(QJsonDocument::Compact);
+#ifdef WORKBENCH_TESTING_ADAPTERS
+    if (m_testResponseConfigured) {
+        int networkError = m_testNetworkError;
+        int status = m_testResponseStatus;
+        QByteArray responseBody = m_testResponseBody;
+        QString replyError = m_testReplyError;
+        if (!m_testResponses.isEmpty()) {
+            const QVariantMap response = m_testResponses.takeFirst().toMap();
+            networkError = response.value(QStringLiteral("networkError"), networkError).toInt();
+            status = response.value(QStringLiteral("status"), status).toInt();
+            responseBody = response.value(QStringLiteral("body")).toByteArray();
+            replyError = response.value(QStringLiteral("replyError"), replyError).toString();
+            m_testResponseConfigured = !m_testResponses.isEmpty();
+        }
+        const QVariantMap result = decodeResponseForTests(networkError, status, responseBody, replyError, operation);
+        if (!result.value(QStringLiteral("ok")).toBool())
+            setLastError(result.value(QStringLiteral("error")).toString());
+        else
+            setLastError({});
+        QTimer::singleShot(0, this, [this, requestId, result] { emit completed(requestId, result); });
+        return requestId;
+    }
+#endif
     if (method == QStringLiteral("GET")) reply = m_network->get(request);
     else if (method == QStringLiteral("POST")) reply = m_network->post(request, body);
     else if (method == QStringLiteral("PATCH")) reply = m_network->sendCustomRequest(request, "PATCH", body);
@@ -259,11 +313,18 @@ QVariantMap PlaneSync::decodeReply(QNetworkReply *reply, const QString &operatio
 {
     const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QByteArray raw = reply->readAll();
+    return decodeResponseForTests(static_cast<int>(reply->error()), status, raw,
+                                  reply->errorString(), operation);
+}
+
+QVariantMap PlaneSync::decodeResponseForTests(int networkError, int status, const QByteArray &raw,
+                                              const QString &replyError, const QString &operation)
+{
     const QJsonDocument document = QJsonDocument::fromJson(raw);
-    if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 300) {
+    if (networkError != static_cast<int>(QNetworkReply::NoError) || status < 200 || status >= 300) {
         QString detail;
         if (document.isObject()) detail = document.object().value(QStringLiteral("detail")).toString();
-        if (detail.isEmpty()) detail = reply->errorString();
+        if (detail.isEmpty()) detail = replyError;
         return failure(operation, QStringLiteral("Plane request failed (%1): %2").arg(status).arg(detail.left(500)), status);
     }
     QVariantMap result = {{QStringLiteral("ok"), true}, {QStringLiteral("operation"), operation},

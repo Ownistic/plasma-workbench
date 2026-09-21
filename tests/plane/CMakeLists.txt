@@ -1,4 +1,7 @@
 add_executable(tst_planesync tst_planesync.cpp)
 target_link_libraries(tst_planesync PRIVATE workbench_plane Qt6::Core Qt6::Test)
+if(WORKBENCH_ENABLE_TEST_ADAPTERS)
+    target_compile_definitions(tst_planesync PRIVATE WORKBENCH_TESTING_ADAPTERS=1)
+endif()
 add_test(NAME PlaneSync COMMAND tst_planesync)
 set_tests_properties(PlaneSync PROPERTIES LABELS "fast;unit")

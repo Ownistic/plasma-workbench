@@ -73,6 +73,54 @@ TestCase {
             compare(workflowStatuses.rows.item(4).is_completed, 1)
             compare(tx.executeSql("SELECT status FROM tasks WHERE id = 'legacy-task'").rows.item(0).status, "completed")
             compare(tx.executeSql("SELECT status FROM status_events WHERE id = 'legacy-event'").rows.item(0).status, "completed")
+
+            Migrations.apply(tx, "2026-01-03T00:00:00.000Z")
+            const repeatedVersions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
+            compare(repeatedVersions.rows.length, 12)
+            compare(repeatedVersions.rows.item(11).version, 12)
+        })
+    }
+
+    function test_rejectsNonContiguousMigrationHistoryWithoutChangingIt() {
+        const database = Sql.LocalStorage.openDatabaseSync(
+            "workbench-migration-gap-" + Date.now(), "1.0", "migration gap test", 1024 * 1024)
+        database.transaction(function(tx) {
+            tx.executeSql("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
+            tx.executeSql("INSERT INTO schema_migrations (version, applied_at_utc) VALUES (2, '2026-01-01T00:00:00.000Z')")
+
+            let message = ""
+            try {
+                Migrations.apply(tx, "2026-01-02T00:00:00.000Z")
+            } catch (error) {
+                message = error.message
+            }
+            verify(message.indexOf("not contiguous") >= 0)
+            const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
+            compare(versions.rows.length, 1)
+            compare(versions.rows.item(0).version, 2)
+        })
+    }
+
+    function test_rejectsDatabaseFromNewerApplicationWithoutChangingIt() {
+        const database = Sql.LocalStorage.openDatabaseSync(
+            "workbench-migration-newer-" + Date.now(), "1.0", "newer migration test", 1024 * 1024)
+        database.transaction(function(tx) {
+            tx.executeSql("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
+            for (let version = 1; version <= 13; version += 1) {
+                tx.executeSql("INSERT INTO schema_migrations (version, applied_at_utc) VALUES (?, ?)",
+                    [version, "2026-01-01T00:00:00.000Z"])
+            }
+
+            let message = ""
+            try {
+                Migrations.apply(tx, "2026-01-02T00:00:00.000Z")
+            } catch (error) {
+                message = error.message
+            }
+            verify(message.indexOf("newer version") >= 0)
+            const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
+            compare(versions.rows.length, 13)
+            compare(versions.rows.item(12).version, 13)
         })
     }
 }

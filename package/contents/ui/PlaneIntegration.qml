@@ -109,11 +109,12 @@ Item {
     }
 
     function ids(value) {
-        if (!Array.isArray(value)) return []
-        return value.map(function(item) { return typeof item === "string" ? item : item.id }).filter(function(id) { return !!id }).sort()
+        const values = Array.isArray(value) ? value
+            : (value && typeof value.length === "number" ? Array.from(value) : [])
+        return values.map(function(item) { return typeof item === "string" ? item : item.id }).filter(function(id) { return !!id }).sort()
     }
 
-    function baseline(remote) {
+    function managedBaselineForRemote(remote) {
         const state = remote.state && typeof remote.state === "object" ? remote.state.id : remote.state
         return { name: remote.name || "", descriptionHtml: remote.description_html || "", state: state || "", assignees: ids(remote.assignees) }
     }
@@ -129,7 +130,7 @@ Item {
         const url = key ? "https://app.plane.so/" + configuration(context.workspaceId).workspace + "/browse/" + key + "/" : (link ? link.remoteUrl : "")
         Database.updateTaskExternalLink({ taskId: context.taskId, provider: "plane", remoteId: remote.id || context.remoteId,
             remoteKey: key, remoteUrl: url, projectId: project, remoteUpdatedAt: remoteTime(remote.updated_at),
-            assigneeIds: ids(remote.assignees), managedBaseline: baseline(remote), remotePayload: remote,
+            assigneeIds: ids(remote.assignees), managedBaseline: managedBaselineForRemote(remote), remotePayload: remote,
             lastSyncedAt: new Date().toISOString(), syncState: "in_sync", syncError: null })
         syncFinished(context.taskId, true, "")
     }
@@ -239,14 +240,24 @@ Item {
             }
             const remote = result.data || ({})
             if (context.kind === "batch") {
-                const items = Array.isArray(remote) ? remote : []
+                const items = Array.isArray(remote) ? remote
+                    : (remote && typeof remote.length === "number" ? Array.from(remote) : [])
                 for (let index = 0; index < items.length; ++index) root.syncRemoteItem(context.workspaceId, items[index])
+                if (result.hasMore && result.nextCursor) {
+                    const config = root.configuration(context.workspaceId)
+                    if (config) {
+                        const request = WorkbenchPlane.PlaneSync.pullAssigned(config.connectionId, config.baseUrl,
+                            config.workspace, config.assigneeId, result.nextCursor)
+                        root.remember(request, { kind: "batch", workspaceId: context.workspaceId })
+                        return
+                    }
+                }
                 root.syncFinished("", true, "Plane linked tasks synchronized.")
                 return
             }
             if (context.kind === "fetchBeforePush") {
                 const link = Database.getTaskExternalLink(context.taskId)
-                if (link && !root.sameBaseline(root.baseline(remote), link.managedBaseline)) {
+                if (link && !root.sameBaseline(root.managedBaselineForRemote(remote), link.managedBaseline)) {
                     Database.markPending(context.taskId, "conflict", "Plane changed since the last sync.")
                     root.release(context.taskId)
                     root.syncFinished(context.taskId, false, "Plane changed since the last sync.")

@@ -1003,6 +1003,7 @@ Item {
             PlasmaComponents.Button {
                 text: i18n("Clear filters")
                 enabled: root.selectedStatuses.length > 0
+                Accessible.name: i18n("Clear status filters")
                 onClicked: {
                     root.selectedStatuses = []
                     root.reload()
