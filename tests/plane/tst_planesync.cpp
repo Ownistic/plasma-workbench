@@ -261,6 +261,9 @@ void PlaneSyncTest::deterministicTransportCoversRequestMethods()
 
     const QStringList requestIds = {
         sync.fetchProjects("test-connection", "https://plane.example", "workspace"),
+        sync.fetchStates("test-connection", "https://plane.example", "workspace", "project"),
+        sync.fetchMembers("test-connection", "https://plane.example", "workspace", "project"),
+        sync.fetchWorkItem("test-connection", "https://plane.example", "workspace", "project", "item"),
         sync.pullAssigned("test-connection", "https://plane.example", "workspace", "member", "cursor"),
         sync.createWorkItem("test-connection", "https://plane.example", "workspace", "project", {{"name", "item"}}),
         sync.updateWorkItem("test-connection", "https://plane.example", "workspace", "project", "item", {{"name", "item"}})

@@ -13,8 +13,8 @@ negative-path assertion, and a live source reference for each partial test.
 | TASK-002 | P0 | Partial: `test_workbench.py::test_task_details_edits_persist_to_the_board` | Appium | release | rejected invalid field or destructive-action cancellation | Partial |
 | TASK-003 | P0 | Partial: `test_workbench.py::test_task_details_edits_persist_to_the_board` | Appium | release | rejected invalid field or destructive-action cancellation | Partial |
 | TASK-004 | P0 | Partial: `tst_database.qml::test_archivingHidesTaskButRetainsSessionsAndHistory` | QML repository | fast | rejected invalid field or destructive-action cancellation | Partial |
-| TASK-005 | P1 | Planned: delete confirmation and cascade contract | QML interaction | fast | rejected invalid field or destructive-action cancellation | Planned |
-| TASK-006 | P1 | Planned: archived-task visibility preference | QML repository | fast | rejected invalid field or destructive-action cancellation | Planned |
+| TASK-005 | P1 | Partial: `tst_database.qml::test_deletingTaskCascadesSessionsAndStatusHistory` | QML repository | fast | rejected invalid field or destructive-action cancellation | Partial |
+| TASK-006 | P1 | Partial: `tst_database.qml::test_archivingHidesTaskButRetainsSessionsAndHistory` | QML repository | fast | rejected invalid field or destructive-action cancellation | Partial |
 | TASK-007 | P1 | Partial: `tst_database.qml::test_titleLimitCountsUnicodeCodePoints` | QML repository | fast | rejected invalid field or destructive-action cancellation | Partial |
 | TASK-008 | P1 | Partial: `tst_database.qml::test_descriptionAcceptsLimitAndRejectsOneExtraCodePoint` | QML repository | fast | rejected invalid field or destructive-action cancellation | Partial |
 | CAT-001 | P0 | Partial: `tst_category_drag.qml::test_emptyCategoryActionsMenuDeletesToTrash` | QML interaction | fast | rejected invalid move or constrained deletion | Partial |
@@ -22,7 +22,7 @@ negative-path assertion, and a live source reference for each partial test.
 | CAT-003 | P0 | Partial: `tst_database.qml::test_filteredMoveUsesStableTaskIds` | QML repository | fast | rejected invalid move or constrained deletion | Partial |
 | CAT-004 | P0 | Partial: `tst_database.qml::test_moveTaskCanPlaceTaskAtEndOfAnotherCategory` | QML repository | fast | rejected invalid move or constrained deletion | Partial |
 | CAT-005 | P0 | Partial: `tst_database.qml::test_rebalanceKeepsUniqueOrderAfterExhaustingGaps` | QML repository | fast | rejected invalid move or constrained deletion | Partial |
-| CAT-006 | P1 | Planned: collapse state persistence contract | QML interaction | fast | rejected invalid move or constrained deletion | Planned |
+| CAT-006 | P1 | Partial: `tst_database.qml::test_categoryCollapseStatePersistsAcrossRepositoryReinitialization` | QML repository | fast | rejected invalid move or constrained deletion | Partial |
 | CAT-007 | P1 | Partial: `tst_category_drag.qml::test_emptyCategoryActionsMenuDeletesToTrash` | QML interaction | fast | rejected invalid move or constrained deletion | Partial |
 | STATUS-001 | P0 | Partial: `tst_database.qml::test_workbenchWorkflowStatusesAreScopedAndTerminal` | QML repository | fast | rejected invalid filter or historical correction | Partial |
 | STATUS-002 | P0 | Partial: `tst_database.qml::test_statusHistoryReconcilesAfterCorrection` | QML repository | fast | rejected invalid filter or historical correction | Partial |
@@ -49,11 +49,11 @@ negative-path assertion, and a live source reference for each partial test.
 | REPORT-005 | P0 | Partial: `tst_database.qml::test_weekAndMonthReportsClipAtCalendarBoundaries` | QML repository | fast | empty, boundary, or invalid-timezone result | Partial |
 | REPORT-006 | P0 | Partial: `tst_timemath.cpp::splitsDstTransition` | native unit | fast | empty, boundary, or invalid-timezone result | Partial |
 | REPORT-007 | P1 | Partial: `tst_database.qml::test_categoryTimeMergesOverlappingTaskSessions` | QML repository | fast | empty, boundary, or invalid-timezone result | Partial |
-| REPORT-008 | P1 | Planned: manual correction included in report fixture | QML repository | fast | empty, boundary, or invalid-timezone result | Planned |
+| REPORT-008 | P1 | Partial: `tst_database.qml::test_manualCorrectionContributesToReports` | QML repository | fast | empty, boundary, or invalid-timezone result | Partial |
 | REPORT-010 | P1 | Partial: `tst_category_drag.qml::test_dailyTimelineStacksConcurrentTimersAndSupportsZoom` | QML interaction | fast | empty, boundary, or invalid-timezone result | Partial |
 | REPORT-011 | P1 | Partial: `tst_category_drag.qml::test_dailyReportExposesDiscoverableEditorControls` | QML interaction | fast | empty, boundary, or invalid-timezone result | Partial |
 | REPORT-012 | P1 | Partial: `tst_category_drag.qml::test_dailyEditorRequiresExplicitDstOffset` | QML interaction | fast | empty, boundary, or invalid-timezone result | Partial |
-| REPORT-013 | P1 | Planned: year heatmap contribution contract | QML interaction | fast | empty, boundary, or invalid-timezone result | Planned |
+| REPORT-013 | P1 | Partial: `tst_category_drag.qml::test_categoryDailyReportUsesBoundedLazyPage` | QML interaction | fast | empty, boundary, or invalid-timezone result | Partial |
 | REPORT-014 | P1 | Partial: `tst_category_drag.qml::test_reportTabsPreserveDailyCategoryScope` | QML interaction | fast | empty, boundary, or invalid-timezone result | Partial |
 | PREF-001 | P1 | Planned: first-day-of-week preference report fixture | QML interaction | fast | malformed preference falls back to a documented default | Planned |
 | PREF-002 | P1 | Planned: report-timezone preference persistence | QML interaction | fast | malformed preference falls back to a documented default | Planned |
@@ -63,7 +63,7 @@ negative-path assertion, and a live source reference for each partial test.
 | PREF-006 | P1 | Planned: Plasma configuration reload contract | QML interaction | fast | malformed preference falls back to a documented default | Planned |
 | PLANE-001 | N/A | Planned: test-only credential adapter rejects production use | native integration | fast | rejected request, remote failure, or secret-redaction path | Planned |
 | PLANE-002 | N/A | Partial: `tst_planesync.cpp::rejectsInvalidBaseUrl` | native unit | fast | rejected request, remote failure, or secret-redaction path | Partial |
-| PLANE-003 | N/A | Planned: fake-Plane project discovery | native integration | fast | rejected request, remote failure, or secret-redaction path | Planned |
+| PLANE-003 | N/A | Partial: `tst_planesync.cpp::deterministicTransportCoversRequestMethods` | native integration | fast | rejected request, remote failure, or secret-redaction path | Partial |
 | PLANE-004 | N/A | Planned: fake-Plane state discovery and mapping | QML integration | fast | rejected request, remote failure, or secret-redaction path | Planned |
 | PLANE-005 | N/A | Partial: `test_workbench.py::test_z_plane_owner_picker_uses_cached_project_members` | Appium | release | rejected request, remote failure, or secret-redaction path | Partial |
 | PLANE-006 | N/A | Partial: `tst_database.qml::test_providerBindingMappingsAndMemberCacheRemainOptional` | QML repository | fast | rejected request, remote failure, or secret-redaction path | Partial |

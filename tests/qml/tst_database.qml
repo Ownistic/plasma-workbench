@@ -840,6 +840,67 @@ TestCase {
         compare(Database.getTask(task.id).statusEvents.length, 1)
     }
 
+    function test_deletingTaskCascadesSessionsAndStatusHistory() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Discard me")
+        const session = Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2024-03-10T09:00:00.000Z",
+            endedAtUtc: "2024-03-10T10:00:00.000Z",
+            timezoneId: "Etc/UTC"
+        })
+        Database.changeStatus(task.id, "in_progress")
+
+        Database.deleteTask(task.id)
+
+        compare(Database.getTask(task.id), null)
+        compare(Database.listTasks({ showArchived: true }).length, 0)
+        assertThrows(function() {
+            Database.updateWorkSession({ id: session.id, note: "must not revive" })
+        }, "does not exist")
+        assertThrows(function() {
+            Database.deleteTask(task.id)
+        }, "does not exist")
+    }
+
+    function test_categoryCollapseStatePersistsAcrossRepositoryReinitialization() {
+        const category = createCategory("Collapsible")
+        compare(Database.listCategories()[0].collapsed, 0)
+
+        Database.updateCategory({ id: category.id, collapsed: true })
+        Database.initialize()
+
+        compare(Database.listCategories()[0].collapsed, 1)
+        Database.updateCategory({ id: category.id, collapsed: false })
+        compare(Database.listCategories()[0].collapsed, 0)
+    }
+
+    function test_manualCorrectionContributesToReports() {
+        const category = createCategory("Product")
+        const task = createTask(category.id, "Corrected work")
+        const session = Database.createWorkSession({
+            taskId: task.id,
+            startedAtUtc: "2024-03-10T09:30:00.000Z",
+            endedAtUtc: "2024-03-10T11:00:00.000Z",
+            timezoneId: "Etc/UTC",
+            note: "Reconstructed from meeting notes"
+        })
+
+        const report = Reports.dailyReport(WorkbenchTime.TimeMath, {
+            year: 2024, month: 3, day: 10, timezoneId: "Etc/UTC", firstDayOfWeek: 1,
+            currentUtc: "2024-03-10T23:59:59.000Z"
+        })
+
+        compare(report.totalSeconds, 90 * 60)
+        const segment = report.sessionSegments.filter(function(candidate) {
+            return candidate.sessionId === session.id
+        })[0]
+        verify(segment !== undefined)
+        compare(Date.parse(segment.endUtc) - Date.parse(segment.startUtc), 90 * 60 * 1000)
+        compare(segment.manuallyEdited, 1)
+        compare(Database.listWorkSessions(task.id)[0].manually_edited, 1)
+    }
+
     function test_descriptionAcceptsLimitAndRejectsOneExtraCodePoint() {
         const category = createCategory("Product")
         const task = createTask(category.id, "Long description")
