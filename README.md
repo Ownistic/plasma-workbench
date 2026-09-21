@@ -95,9 +95,11 @@ state to one of those local statuses. Mapping changes save to that workbench
 immediately and remain in place when Plane metadata is refreshed.
 
 Tasks in mapped categories can be created and updated in Plane, and **Sync
-linked tasks** pulls assigned work after an assignee ID is configured. The task
-owner picker uses the cached members for its mapped Plane project, so choosing
-an owner is fast and works from the local cache; it updates the next task sync.
+linked tasks** pulls assigned work after an assignee ID is configured. Title,
+description, status, priority, and assignees synchronize in both directions.
+The task owner picker uses the cached members for its mapped Plane project, so
+choosing an owner is fast and works from the local cache; it updates the next
+task sync.
 
 The legacy command-line importer remains available for a read-only Plane pull.
 It imports assigned Plane work items into the `4leaflabs` workspace without

@@ -1655,6 +1655,7 @@ Item {
             taskTitle.text = ""
             taskDescription.text = ""
             taskStatus.currentIndex = 0
+            taskPriority.currentIndex = 0
             taskCategory.currentIndex = 0
             taskAssigneeIds = []
             taskTitle.forceActiveFocus()
@@ -1667,6 +1668,7 @@ Item {
                 title: taskTitle.text,
                 details: taskDescription.text,
                 status: taskStatus.currentValue,
+                priority: taskPriority.currentValue,
                 categoryId: categoryModel.get(taskCategory.currentIndex).id
             })
             root.reload()
@@ -1712,6 +1714,21 @@ Item {
                 textRole: "name"
                 valueRole: "id"
                 Accessible.name: i18n("Task status")
+            }
+
+            PlasmaComponents.ComboBox {
+                id: taskPriority
+                Layout.fillWidth: true
+                model: [
+                    { id: "none", name: i18n("Priority: None") },
+                    { id: "urgent", name: i18n("Priority: Urgent") },
+                    { id: "high", name: i18n("Priority: High") },
+                    { id: "medium", name: i18n("Priority: Medium") },
+                    { id: "low", name: i18n("Priority: Low") }
+                ]
+                textRole: "name"
+                valueRole: "id"
+                Accessible.name: i18n("Task priority")
             }
 
             PlasmaComponents.TextArea {

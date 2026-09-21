@@ -1,6 +1,6 @@
 .pragma library
 
-const CURRENT_VERSION = 12
+const CURRENT_VERSION = 13
 
 const migrations = [
     {
@@ -335,6 +335,15 @@ const migrations = [
                 "SELECT workspace_id, provider, project_id, remote_state_id, local_status, is_outbound, remote_state_name, created_at_utc, updated_at_utc FROM provider_state_mappings_v11",
             "DROP TABLE provider_state_mappings_v11",
             "CREATE UNIQUE INDEX provider_state_mappings_outbound_idx ON provider_state_mappings(workspace_id, provider, project_id, local_status) WHERE is_outbound = 1"
+        ]
+    },
+    {
+        // Priority is a task property shared by the local model and Plane.
+        // Existing local tasks remain deliberately unprioritized after upgrade.
+        version: 13,
+        statements: [
+            "ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'none' " +
+                "CHECK (priority IN ('none', 'urgent', 'high', 'medium', 'low'))"
         ]
     }
 ]

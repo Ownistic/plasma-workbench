@@ -220,6 +220,25 @@ TestCase {
         compare(Database.listStatusEvents(ready.id).length, 1)
     }
 
+    function test_taskPriorityDefaultsValidatesAndPersists() {
+        const category = createCategory("Product")
+        const task = Database.createTask({ categoryId: category.id, title: "Prioritized", status: "ready", priority: "urgent" })
+        compare(Database.getTask(task.id).priority, "urgent")
+        compare(Database.listTasks({ workspaceId: Database.listWorkspaces()[0].id })[0].priority, "urgent")
+
+        Database.updateTask({ id: task.id, title: "Prioritized" })
+        compare(Database.getTask(task.id).priority, "urgent")
+        Database.saveTask({ id: task.id, title: "Prioritized", details: "", categoryId: category.id,
+            status: "ready", priority: "low" })
+        compare(Database.getTask(task.id).priority, "low")
+
+        assertThrows(function() {
+            Database.saveTask({ id: task.id, title: "Prioritized", details: "", categoryId: category.id,
+                status: "ready", priority: "important" })
+        }, "priority")
+        compare(Database.getTask(task.id).priority, "low")
+    }
+
     function test_statusHistoryReconcilesAfterCorrection() {
         const category = createCategory("Product")
         const task = createTask(category.id, "Implement reports", "backlog")

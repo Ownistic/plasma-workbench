@@ -42,6 +42,9 @@ public:
     Q_INVOKABLE QString fetchWorkItem(const QString &connectionId, const QString &baseUrl,
                                       const QString &workspace, const QString &projectId,
                                       const QString &workItemId);
+    Q_INVOKABLE QString findWorkItemsByExternalReference(const QString &connectionId, const QString &baseUrl,
+                                                         const QString &workspace, const QString &projectId,
+                                                         const QString &externalSource, const QString &externalId);
     Q_INVOKABLE QString pullAssigned(const QString &connectionId, const QString &baseUrl,
                                      const QString &workspace, const QString &assigneeId,
                                      const QString &cursor = QString());

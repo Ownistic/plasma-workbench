@@ -9,6 +9,7 @@ Item {
     id: root
 
     required property var board
+    readonly property string planeExternalSource: "io.github.ownisticapps.worktodo"
     property var requests: ({})
     property var activeTasks: ({})
     signal syncFinished(string taskId, bool ok, string message)
@@ -67,8 +68,19 @@ Item {
     function fieldsFor(task, workspaceId, projectId, assigneeIds) {
         const state = outboundState(workspaceId, projectId, task.status)
         if (!state) throw new Error("Map an outbound Plane state for '" + task.status.replace("_", " ") + "' before syncing.")
-        return { name: task.title, description_html: htmlFor(task.details), state: state,
+        return { name: task.title, description_html: htmlFor(task.details), state: state, priority: task.priority,
             assignees: assigneeIds || [] }
+    }
+
+    function createFieldsFor(task, workspaceId, projectId, assigneeIds) {
+        const fields = fieldsFor(task, workspaceId, projectId, assigneeIds)
+        fields.external_source = planeExternalSource
+        fields.external_id = task.id
+        return fields
+    }
+
+    function hasRecoverableCreateBaseline(link) {
+        return !!link && !!link.managedBaseline && Object.keys(link.managedBaseline).length > 0
     }
 
     function queueTask(taskId, workspaceId, assigneeIds) {
@@ -80,21 +92,31 @@ Item {
         let link = Database.getTaskExternalLink(taskId)
         if ((!link || link.provider !== "plane") && (!config || !project)) { release(taskId); return }
         try {
+            if (!config) throw new Error("Connect this workspace to Plane before syncing this task.")
+            if (!project || (link && link.projectId && project.remoteProjectId !== link.projectId)) {
+                throw new Error("This task's category is not mapped to its Plane project.")
+            }
+            let fields
             if (!link) {
+                fields = fieldsFor(task, workspaceId, project.remoteProjectId, assigneeIds || [])
                 link = Database.updateTaskExternalLink({ taskId: taskId, provider: "plane", projectId: project.remoteProjectId,
-                    assigneeIds: assigneeIds || [], syncState: "pending_create" })
+                    assigneeIds: assigneeIds || [], managedBaseline: managedBaselineForRemote(fields), syncState: "pending_create" })
             } else if (assigneeIds !== undefined) {
                 link = Database.updateTaskExternalLink({ taskId: taskId, assigneeIds: assigneeIds, syncState: link.remoteId ? "pending_push" : "pending_create", syncError: null })
             }
-            if (!config) throw new Error("Connect this workspace to Plane before syncing this task.")
-            if (!project || (link.projectId && project.remoteProjectId !== link.projectId)) {
-                throw new Error("This task's category is not mapped to its Plane project.")
-            }
-            const fields = fieldsFor(task, workspaceId, project.remoteProjectId, link.assigneeIds)
+            if (!fields) fields = fieldsFor(task, workspaceId, project.remoteProjectId, link.assigneeIds)
             if (!link.remoteId) {
-                const requestId = WorkbenchPlane.PlaneSync.createWorkItem(config.connectionId, config.baseUrl, config.workspace,
-                    project.remoteProjectId, fields)
-                remember(requestId, { kind: "create", taskId: taskId, workspaceId: workspaceId, projectId: project.remoteProjectId })
+                if (!hasRecoverableCreateBaseline(link)) {
+                    const message = "This pending Plane creation predates recoverable create tracking. Link it to the existing Plane work item before retrying."
+                    Database.markPending(taskId, "error", message)
+                    release(taskId)
+                    syncFinished(taskId, false, message)
+                    return
+                }
+                const requestId = WorkbenchPlane.PlaneSync.findWorkItemsByExternalReference(config.connectionId, config.baseUrl,
+                    config.workspace, project.remoteProjectId, planeExternalSource, task.id)
+                remember(requestId, { kind: "resolvePendingCreate", taskId: taskId, workspaceId: workspaceId,
+                    projectId: project.remoteProjectId, fields: fields })
                 return
             }
             const requestId = WorkbenchPlane.PlaneSync.fetchWorkItem(config.connectionId, config.baseUrl, config.workspace,
@@ -116,14 +138,15 @@ Item {
 
     function managedBaselineForRemote(remote) {
         const state = remote.state && typeof remote.state === "object" ? remote.state.id : remote.state
-        return { name: remote.name || "", descriptionHtml: remote.description_html || "", state: state || "", assignees: ids(remote.assignees) }
+        return { name: remote.name || "", descriptionHtml: remote.description_html || "", state: state || "",
+            priority: remote.priority || "none", assignees: ids(remote.assignees) }
     }
 
     function sameBaseline(left, right) {
         return JSON.stringify(left || {}) === JSON.stringify(right || {})
     }
 
-    function completeSuccess(context, remote) {
+    function completeSuccess(context, remote, notify) {
         const link = Database.getTaskExternalLink(context.taskId)
         const project = remote.project && typeof remote.project === "object" ? remote.project.id : (remote.project || context.projectId)
         const key = remote.identifier || remote.key || (link ? link.remoteKey : "")
@@ -132,7 +155,7 @@ Item {
             remoteKey: key, remoteUrl: url, projectId: project, remoteUpdatedAt: remoteTime(remote.updated_at),
             assigneeIds: ids(remote.assignees), managedBaseline: managedBaselineForRemote(remote), remotePayload: remote,
             lastSyncedAt: new Date().toISOString(), syncState: "in_sync", syncError: null })
-        syncFinished(context.taskId, true, "")
+        if (notify !== false) syncFinished(context.taskId, true, "")
     }
 
     function remoteTime(value) {
@@ -209,7 +232,7 @@ Item {
         if (!status) return
         if (!link) {
             const task = Database.createTask({ categoryId: categoryId, title: remote.name || "Plane work item",
-                details: remote.description_stripped || "", status: status })
+                details: remote.description_stripped || "", status: status, priority: remote.priority || "none" })
             completeSuccess({ taskId: task.id, workspaceId: workspaceId, projectId: projectId, remoteId: remoteId }, remote)
             return
         }
@@ -220,7 +243,7 @@ Item {
             return
         }
         Database.saveTask({ id: task.id, title: remote.name || task.title, details: remote.description_stripped || "",
-            categoryId: categoryId, status: status })
+            categoryId: categoryId, status: status, priority: remote.priority || "none" })
         completeSuccess({ taskId: task.id, workspaceId: workspaceId, projectId: projectId, remoteId: remoteId }, remote)
     }
 
@@ -233,7 +256,8 @@ Item {
             delete next[requestId]
             root.requests = next
             if (!result.ok) {
-                Database.markPending(context.taskId, context.kind === "create" ? "pending_create" : "error", result.error)
+                Database.markPending(context.taskId, context.kind === "create" || context.kind === "resolvePendingCreate"
+                    ? "pending_create" : "error", result.error)
                 root.release(context.taskId)
                 root.syncFinished(context.taskId, false, result.error)
                 return
@@ -253,6 +277,65 @@ Item {
                     }
                 }
                 root.syncFinished("", true, "Plane linked tasks synchronized.")
+                return
+            }
+            if (context.kind === "resolvePendingCreate") {
+                const matches = Array.isArray(remote) ? remote
+                    : (remote && typeof remote.length === "number" ? Array.from(remote) : [])
+                if (matches.length > 1) {
+                    const message = "More than one Plane work item has this Workbench external reference. Resolve the duplicate before retrying."
+                    Database.markPending(context.taskId, "conflict", message)
+                    root.release(context.taskId)
+                    root.syncFinished(context.taskId, false, message)
+                    return
+                }
+                if (matches.length === 1) {
+                    const found = matches[0]
+                    const link = Database.getTaskExternalLink(context.taskId)
+                    if (!found.id) {
+                        const message = "Plane returned an invalid work item while resolving a pending creation."
+                        Database.markPending(context.taskId, "pending_create", message)
+                        root.release(context.taskId)
+                        root.syncFinished(context.taskId, false, message)
+                        return
+                    }
+                    if (!link || !root.sameBaseline(root.managedBaselineForRemote(found), link.managedBaseline)) {
+                        const message = "The recovered Plane work item changed since its original creation. Resolve the conflict before retrying."
+                        Database.markPending(context.taskId, "conflict", message)
+                        root.release(context.taskId)
+                        root.syncFinished(context.taskId, false, message)
+                        return
+                    }
+                    root.completeSuccess(context, found, false)
+                    const config = root.configuration(context.workspaceId)
+                    if (!config) {
+                        const message = "Connect this workspace to Plane before syncing this task."
+                        Database.markPending(context.taskId, "error", message)
+                        root.release(context.taskId)
+                        root.syncFinished(context.taskId, false, message)
+                        return
+                    }
+                    const request = WorkbenchPlane.PlaneSync.updateWorkItem(config.connectionId, config.baseUrl, config.workspace,
+                        context.projectId, found.id, context.fields)
+                    root.remember(request, { kind: "push", taskId: context.taskId, workspaceId: context.workspaceId,
+                        projectId: context.projectId, remoteId: found.id })
+                    return
+                }
+                const config = root.configuration(context.workspaceId)
+                if (!config) {
+                    const message = "Connect this workspace to Plane before syncing this task."
+                    Database.markPending(context.taskId, "pending_create", message)
+                    root.release(context.taskId)
+                    root.syncFinished(context.taskId, false, message)
+                    return
+                }
+                const task = Database.getTask(context.taskId)
+                if (!task) { root.release(context.taskId); return }
+                const request = WorkbenchPlane.PlaneSync.createWorkItem(config.connectionId, config.baseUrl, config.workspace,
+                    context.projectId, root.createFieldsFor(task, context.workspaceId, context.projectId,
+                        Database.getTaskExternalLink(context.taskId).assigneeIds))
+                root.remember(request, { kind: "create", taskId: context.taskId, workspaceId: context.workspaceId,
+                    projectId: context.projectId })
                 return
             }
             if (context.kind === "fetchBeforePush") {
@@ -287,7 +370,8 @@ Item {
                     return
                 }
                 Database.saveTask({ id: context.taskId, title: remote.name || task.title,
-                    details: remote.description_stripped || "", categoryId: task.category_id, status: status })
+                    details: remote.description_stripped || "", categoryId: task.category_id, status: status,
+                    priority: remote.priority || "none" })
                 root.completeSuccess(context, remote)
                 return
             }

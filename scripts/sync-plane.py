@@ -25,6 +25,7 @@ import uuid
 DEFAULT_DATABASE_DIR = pathlib.Path.home() / ".local/share/plasmashell/QML/OfflineStorage/Databases"
 DATABASE_NAME = "io.github.ownisticapps.worktodo"
 VALID_STATUSES = {"backlog", "ready", "in_progress", "blocked", "completed"}
+VALID_PRIORITIES = {"none", "urgent", "high", "medium", "low"}
 PLANE_STATUS_MAP = {
     "backlog": "backlog",
     "unstarted": "ready",
@@ -61,12 +62,16 @@ def validate_item(item: dict) -> dict:
     status = str(item["status"])
     if status not in VALID_STATUSES:
         raise ValueError(f"Unsupported Workbench status {status!r} for {item['key']}")
+    priority = str(item.get("priority", "none")).lower()
+    if priority not in VALID_PRIORITIES:
+        raise ValueError(f"Unsupported Plane priority {priority!r} for {item['key']}")
     return {
         "id": str(item["id"]).strip(),
         "key": str(item["key"]).strip(),
         "title": str(item["title"]).strip(),
         "details": str(item.get("details", "")),
         "status": status,
+        "priority": priority,
         "url": str(item["url"]).strip(),
         "project_id": str(item.get("project_id", "")).strip() or None,
         "category": str(item.get("category", "")).strip(),
@@ -131,6 +136,7 @@ def fetch_plane_items(base_url: str, api_key: str, workspace: str, assignee: str
                     "title": str(item["name"]),
                     "details": description,
                     "status": status,
+                    "priority": str(item.get("priority") or "none").lower(),
                     "url": url,
                     "project_id": project_id,
                     "category": str(project["name"]),
@@ -177,6 +183,10 @@ def link_table(connection: sqlite3.Connection) -> str:
     return "provider_task_links" if row else "external_tasks"
 
 
+def tasks_support_priority(connection: sqlite3.Connection) -> bool:
+    return any(row[1] == "priority" for row in connection.execute("PRAGMA table_info(tasks)"))
+
+
 def plan_item(connection: sqlite3.Connection, category: str, item: dict) -> tuple[str, sqlite3.Row | None, sqlite3.Row | None]:
     links = link_table(connection)
     link = connection.execute(
@@ -197,6 +207,7 @@ def plan_item(connection: sqlite3.Connection, category: str, item: dict) -> tupl
         task["title"] != item["title"],
         task["details"] != item["details"],
         task["status"] != item["status"],
+        tasks_support_priority(connection) and task["priority"] != item["priority"],
         task["category_id"] != category,
     )):
         return "update", link, task
@@ -217,16 +228,27 @@ def insert_status_event(connection: sqlite3.Connection, task_id: str, previous: 
 def apply_item(connection: sqlite3.Connection, category: str, item: dict, action: str, link: sqlite3.Row | None, task: sqlite3.Row | None) -> None:
     timestamp = utc_now()
     links = link_table(connection)
+    has_priority = tasks_support_priority(connection)
     if action == "create":
         task_id = new_id()
-        connection.execute(
-            "INSERT INTO tasks (id, category_id, title, details, status, position, archived_at_utc, "
-            "completed_at_utc, created_at_utc, updated_at_utc, tracked_seconds) "
-            "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 0)",
-            (task_id, category, item["title"], item["details"], item["status"],
-             next_position(connection, category), timestamp if item["status"] == "completed" else None,
-             timestamp, timestamp),
-        )
+        if has_priority:
+            connection.execute(
+                "INSERT INTO tasks (id, category_id, title, details, status, priority, position, archived_at_utc, "
+                "completed_at_utc, created_at_utc, updated_at_utc, tracked_seconds) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 0)",
+                (task_id, category, item["title"], item["details"], item["status"], item["priority"],
+                 next_position(connection, category), timestamp if item["status"] == "completed" else None,
+                 timestamp, timestamp),
+            )
+        else:
+            connection.execute(
+                "INSERT INTO tasks (id, category_id, title, details, status, position, archived_at_utc, "
+                "completed_at_utc, created_at_utc, updated_at_utc, tracked_seconds) "
+                "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 0)",
+                (task_id, category, item["title"], item["details"], item["status"],
+                 next_position(connection, category), timestamp if item["status"] == "completed" else None,
+                 timestamp, timestamp),
+            )
         insert_status_event(connection, task_id, None, item["status"], timestamp)
         if links == "provider_task_links":
             connection.execute(
@@ -263,11 +285,19 @@ def apply_item(connection: sqlite3.Connection, category: str, item: dict, action
                     (task["id"], task["id"]),
                 )
         completed_at = (task["completed_at"] or timestamp) if item["status"] == "completed" else None
-        connection.execute(
-            "UPDATE tasks SET category_id = ?, title = ?, details = ?, status = ?, completed_at_utc = ?, "
-            "updated_at_utc = ? WHERE id = ?",
-            (category, item["title"], item["details"], item["status"], completed_at, timestamp, task["id"]),
-        )
+        if has_priority:
+            connection.execute(
+                "UPDATE tasks SET category_id = ?, title = ?, details = ?, status = ?, priority = ?, completed_at_utc = ?, "
+                "updated_at_utc = ? WHERE id = ?",
+                (category, item["title"], item["details"], item["status"], item["priority"], completed_at,
+                 timestamp, task["id"]),
+            )
+        else:
+            connection.execute(
+                "UPDATE tasks SET category_id = ?, title = ?, details = ?, status = ?, completed_at_utc = ?, "
+                "updated_at_utc = ? WHERE id = ?",
+                (category, item["title"], item["details"], item["status"], completed_at, timestamp, task["id"]),
+            )
         last_local_updated_at = timestamp
         recorded_remote_updated_at = item["updated_at"]
         sync_state = "in_sync"

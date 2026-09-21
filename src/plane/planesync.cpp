@@ -201,7 +201,8 @@ void PlaneSync::setResponseQueueForTests(const QVariantList &responses)
 QVariantMap PlaneSync::normalizedFields(const QVariantMap &fields, QString *error)
 {
     static const QSet<QString> allowed = {QStringLiteral("name"), QStringLiteral("description_html"),
-                                          QStringLiteral("state"), QStringLiteral("assignees")};
+                                          QStringLiteral("state"), QStringLiteral("priority"), QStringLiteral("assignees"),
+                                          QStringLiteral("external_source"), QStringLiteral("external_id")};
     QVariantMap clean;
     for (auto it = fields.cbegin(); it != fields.cend(); ++it) {
         if (!allowed.contains(it.key())) {
@@ -212,7 +213,20 @@ QVariantMap PlaneSync::normalizedFields(const QVariantMap &fields, QString *erro
             *error = QStringLiteral("A Plane work item needs a title.");
             return {};
         }
+        if ((it.key() == QStringLiteral("external_source") || it.key() == QStringLiteral("external_id"))
+            && it.value().toString().trimmed().isEmpty()) {
+            *error = QStringLiteral("Plane external references must not be empty.");
+            return {};
+        }
         clean.insert(it.key(), it.value());
+    }
+    if (clean.contains(QStringLiteral("priority"))) {
+        static const QSet<QString> priorities = {QStringLiteral("none"), QStringLiteral("urgent"),
+                                                  QStringLiteral("high"), QStringLiteral("medium"), QStringLiteral("low")};
+        if (!priorities.contains(clean.value(QStringLiteral("priority")).toString())) {
+            *error = QStringLiteral("Plane priority must be none, urgent, high, medium, or low.");
+            return {};
+        }
     }
     if (clean.contains(QStringLiteral("assignees")) && clean.value(QStringLiteral("assignees")).typeId() != QMetaType::QVariantList) {
         *error = QStringLiteral("Plane assignees must be a list of member IDs.");
@@ -349,6 +363,8 @@ QString PlaneSync::fetchMembers(const QString &connectionId, const QString &base
 { return begin(QStringLiteral("members"), connectionId, QStringLiteral("GET"), baseUrl, workspace, projectId, QStringLiteral("/members/"), {}, {}); }
 QString PlaneSync::fetchWorkItem(const QString &connectionId, const QString &baseUrl, const QString &workspace, const QString &projectId, const QString &workItemId)
 { return begin(QStringLiteral("workItem"), connectionId, QStringLiteral("GET"), baseUrl, workspace, projectId, QStringLiteral("/work-items/") + encodedPathPart(workItemId) + QStringLiteral("/"), {}, {}); }
+QString PlaneSync::findWorkItemsByExternalReference(const QString &connectionId, const QString &baseUrl, const QString &workspace, const QString &projectId, const QString &externalSource, const QString &externalId)
+{ return begin(QStringLiteral("externalReference"), connectionId, QStringLiteral("GET"), baseUrl, workspace, projectId, QStringLiteral("/work-items/"), {}, {{QStringLiteral("external_source"), externalSource}, {QStringLiteral("external_id"), externalId}}); }
 QString PlaneSync::pullAssigned(const QString &connectionId, const QString &baseUrl, const QString &workspace, const QString &assigneeId, const QString &cursor)
 { return begin(QStringLiteral("pullAssigned"), connectionId, QStringLiteral("GET"), baseUrl, workspace, {}, QStringLiteral("/work-items/"), {}, {{QStringLiteral("assignee"), assigneeId}, {QStringLiteral("cursor"), cursor}, {QStringLiteral("expand"), QStringLiteral("state")}, {QStringLiteral("per_page"), 100}}); }
 QString PlaneSync::createWorkItem(const QString &connectionId, const QString &baseUrl, const QString &workspace, const QString &projectId, const QVariantMap &fields)

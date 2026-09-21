@@ -25,6 +25,12 @@ TestCase {
         signalName: "syncFinished"
     }
 
+    SignalSpy {
+        id: planeCompleted
+        target: WorkbenchPlane.PlaneSync
+        signalName: "completed"
+    }
+
     function init() {
         if (typeof WorkbenchPlane.PlaneSync.setTokenForTests !== "function")
             skip("Plane test adapters are disabled for this build")
@@ -38,6 +44,7 @@ TestCase {
         integration = createTemporaryObject(integrationComponent, board)
         verify(integration !== null)
         finished.clear()
+        planeCompleted.clear()
     }
 
     function cleanup() {
@@ -63,18 +70,21 @@ TestCase {
         const task = Database.createTask({ categoryId: fixture.category.id, title: title, details: "Local details", status: "ready" })
         Database.updateTaskExternalLink({ taskId: task.id, provider: "plane", remoteId: "remote-3", remoteKey: "PROJ-3",
             projectId: "project-1", assigneeIds: [], managedBaseline: { name: title, descriptionHtml: "<p>Local details</p>",
-                state: "state-ready", assignees: [] }, remotePayload: {}, syncState: "in_sync" })
+                state: "state-ready", priority: "none", assignees: [] }, remotePayload: {}, syncState: "in_sync" })
         return task
     }
 
     function test_queueCreatesAndLinksRemoteWorkItem() {
         const fixture = configureWorkspace()
-        const task = Database.createTask({ categoryId: fixture.category.id, title: "Local title", details: "A < B", status: "ready" })
+        const task = Database.createTask({ categoryId: fixture.category.id, title: "Local title", details: "A < B", status: "ready", priority: "high" })
         WorkbenchPlane.PlaneSync.setTokenForTests("test-connection", "test-token")
-        WorkbenchPlane.PlaneSync.setResponseForTests(0, 201,
-            '{"id":"remote-1","identifier":"PROJ-1","project":{"id":"project-1"},"name":"Local title",' +
-            '"description_html":"<p>A &lt; B</p>","state":{"id":"state-ready"},"assignees":[{"id":"member-1"}],' +
-            '"updated_at":"2026-09-21T12:00:00.000Z"}')
+        WorkbenchPlane.PlaneSync.setResponseQueueForTests([
+            { networkError: 0, status: 200, body: '{"results":[]}' },
+            { networkError: 0, status: 201,
+                body: '{"id":"remote-1","identifier":"PROJ-1","project":{"id":"project-1"},"name":"Local title",' +
+                    '"description_html":"<p>A &lt; B</p>","state":{"id":"state-ready"},"priority":"high","assignees":[{"id":"member-1"}],' +
+                    '"updated_at":"2026-09-21T12:00:00.000Z"}' }
+        ])
 
         integration.queueTask(task.id, fixture.workspace.id, ["member-1"])
 
@@ -88,7 +98,82 @@ TestCase {
         compare(link.syncState, "in_sync")
         compare(link.assigneeIds, ["member-1"])
         compare(link.managedBaseline.state, "state-ready")
+        compare(link.managedBaseline.priority, "high")
+        compare(Database.getTask(task.id).priority, "high")
         verify(link.remoteUrl.indexOf("PROJ-1") >= 0)
+        compare(planeCompleted.count, 2)
+        compare(planeCompleted.signalArguments[0][1].operation, "externalReference")
+        compare(planeCompleted.signalArguments[1][1].operation, "create")
+    }
+
+    function test_pendingCreateRecoversRemoteWorkItemBeforeRetryingCreate() {
+        const fixture = configureWorkspace()
+        const task = Database.createTask({ categoryId: fixture.category.id, title: "Local title", details: "Local details",
+            status: "ready", priority: "medium" })
+        Database.updateTaskExternalLink({ taskId: task.id, provider: "plane", projectId: "project-1", assigneeIds: [],
+            managedBaseline: { name: "Local title", descriptionHtml: "<p>Local details</p>", state: "state-ready",
+                priority: "none", assignees: [] }, syncState: "pending_create" })
+        WorkbenchPlane.PlaneSync.setTokenForTests("test-connection", "test-token")
+        WorkbenchPlane.PlaneSync.setResponseQueueForTests([
+            { networkError: 0, status: 200,
+                body: '{"results":[{"id":"remote-recovered","identifier":"PROJ-9","project":{"id":"project-1"},' +
+                    '"name":"Local title","description_html":"<p>Local details</p>","state":{"id":"state-ready"},' +
+                    '"priority":"none","assignees":[],"external_source":"io.github.ownisticapps.worktodo",' +
+                    '"external_id":"' + task.id + '"}]}' },
+            { networkError: 0, status: 200,
+                body: '{"id":"remote-recovered","identifier":"PROJ-9","project":{"id":"project-1"},' +
+                    '"name":"Local title","description_html":"<p>Local details</p>","state":{"id":"state-ready"},' +
+                    '"priority":"medium","assignees":[],"updated_at":"2026-09-21T12:00:00.000Z"}' }
+        ])
+
+        integration.queueTask(task.id, fixture.workspace.id)
+
+        tryCompare(finished, "count", 1, 1000)
+        verify(finished.signalArguments[0][1])
+        const link = Database.getTaskExternalLink(task.id)
+        compare(link.remoteId, "remote-recovered")
+        compare(link.syncState, "in_sync")
+        compare(link.managedBaseline.priority, "medium")
+        compare(planeCompleted.count, 2)
+        compare(planeCompleted.signalArguments[0][1].operation, "externalReference")
+        compare(planeCompleted.signalArguments[1][1].operation, "update")
+    }
+
+    function test_legacyPendingCreateDoesNotPostAnotherRemoteWorkItem() {
+        const fixture = configureWorkspace()
+        const task = Database.createTask({ categoryId: fixture.category.id, title: "Legacy pending", status: "ready" })
+        Database.updateTaskExternalLink({ taskId: task.id, provider: "plane", projectId: "project-1", assigneeIds: [],
+            syncState: "pending_create" })
+
+        integration.queueTask(task.id, fixture.workspace.id)
+
+        tryCompare(finished, "count", 1, 1000)
+        verify(!finished.signalArguments[0][1])
+        verify(finished.signalArguments[0][2].indexOf("predates recoverable") >= 0)
+        compare(planeCompleted.count, 0)
+        const link = Database.getTaskExternalLink(task.id)
+        compare(link.syncState, "error")
+    }
+
+    function test_ambiguousRecoveredCreateDoesNotPostAnotherRemoteWorkItem() {
+        const fixture = configureWorkspace()
+        const task = Database.createTask({ categoryId: fixture.category.id, title: "Ambiguous pending", status: "ready" })
+        Database.updateTaskExternalLink({ taskId: task.id, provider: "plane", projectId: "project-1", assigneeIds: [],
+            managedBaseline: { name: "Ambiguous pending", descriptionHtml: "<p></p>", state: "state-ready",
+                priority: "none", assignees: [] }, syncState: "pending_create" })
+        WorkbenchPlane.PlaneSync.setTokenForTests("test-connection", "test-token")
+        WorkbenchPlane.PlaneSync.setResponseForTests(0, 200,
+            '{"results":[{"id":"remote-a"},{"id":"remote-b"}]}')
+
+        integration.queueTask(task.id, fixture.workspace.id)
+
+        tryCompare(finished, "count", 1, 1000)
+        verify(!finished.signalArguments[0][1])
+        verify(finished.signalArguments[0][2].indexOf("More than one") >= 0)
+        compare(planeCompleted.count, 1)
+        compare(planeCompleted.signalArguments[0][1].operation, "externalReference")
+        const link = Database.getTaskExternalLink(task.id)
+        compare(link.syncState, "conflict")
     }
 
     function test_workspacePullCreatesMappedRemoteWorkItem() {
@@ -96,7 +181,7 @@ TestCase {
         WorkbenchPlane.PlaneSync.setTokenForTests("test-connection", "test-token")
         WorkbenchPlane.PlaneSync.setResponseForTests(0, 200,
             '{"results":[{"id":"remote-2","identifier":"PROJ-2","project":{"id":"project-1"},' +
-            '"name":"Remote title","description_stripped":"Imported details","state":{"id":"state-ready"},' +
+            '"name":"Remote title","description_stripped":"Imported details","state":{"id":"state-ready"},"priority":"urgent",' +
             '"assignees":[{"id":"member-1"}],"updated_at":"2026-09-21T12:00:00.000Z"}],"next_page_results":false}')
 
         integration.syncWorkspace(fixture.workspace.id)
@@ -110,6 +195,7 @@ TestCase {
         compare(tasks[0].title, "Remote title")
         compare(tasks[0].details, "Imported details")
         compare(tasks[0].status, "ready")
+        compare(tasks[0].priority, "urgent")
         const link = Database.getTaskExternalLink(tasks[0].taskId)
         compare(link.remoteId, "remote-2")
         compare(link.syncState, "in_sync")
@@ -203,7 +289,7 @@ TestCase {
         WorkbenchPlane.PlaneSync.setTokenForTests("test-connection", "test-token")
         WorkbenchPlane.PlaneSync.setResponseForTests(0, 200,
             '{"id":"remote-3","identifier":"PROJ-3","project":{"id":"project-1"},"name":"Refreshed title",' +
-            '"description_stripped":"Refreshed details","state":{"id":"state-ready"},"assignees":[{"id":"member-1"}],' +
+            '"description_stripped":"Refreshed details","state":{"id":"state-ready"},"priority":"low","assignees":[{"id":"member-1"}],' +
             '"updated_at":"2026-09-21T14:00:00.000Z"}')
 
         integration.refreshTask(task.id, fixture.workspace.id)
@@ -215,6 +301,7 @@ TestCase {
         compare(refreshed.title, "Refreshed title")
         compare(refreshed.details, "Refreshed details")
         compare(refreshed.status, "ready")
+        compare(refreshed.priority, "low")
         const link = Database.getTaskExternalLink(task.id)
         compare(link.syncState, "in_sync")
         compare(link.assigneeIds, ["member-1"])

@@ -28,6 +28,14 @@ Kirigami.AbstractCard {
     signal dropRequested(string sourceTaskId, string placement)
     readonly property bool dragging: dragHandler.active
 
+    function priorityLabel(priority) {
+        if (priority === "urgent") return i18n("Urgent")
+        if (priority === "high") return i18n("High")
+        if (priority === "medium") return i18n("Medium")
+        if (priority === "low") return i18n("Low")
+        return i18n("None")
+    }
+
     implicitHeight: content.implicitHeight + Kirigami.Units.largeSpacing * 2
     objectName: root.objectNamePrefix.length > 0 ? root.objectNamePrefix + "-task-" + root.task.taskId
         : "task-card-" + root.task.taskId
@@ -81,6 +89,13 @@ Kirigami.AbstractCard {
                     text: root.task.statusName || root.task.status.replace("_", " ")
                     color: Kirigami.Theme.disabledTextColor
                     Accessible.name: i18n("Status: %1", root.task.statusName || root.task.status.replace("_", " "))
+                }
+
+                PlasmaComponents.Label {
+                    visible: root.task.priority && root.task.priority !== "none"
+                    text: i18n("Priority: %1", root.priorityLabel(root.task.priority))
+                    color: Kirigami.Theme.disabledTextColor
+                    Accessible.name: i18n("Priority: %1", root.priorityLabel(root.task.priority))
                 }
 
                 PlasmaComponents.Label {

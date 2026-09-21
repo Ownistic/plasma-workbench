@@ -9,6 +9,7 @@ const POSITION_GAP = 1024
 const POSITION_OFFSET = 1000000000
 const TRASH_RETENTION_DAYS = 30
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000
+const TASK_PRIORITIES = ["none", "urgent", "high", "medium", "low"]
 
 let databaseName = DATABASE_ID
 let database
@@ -83,6 +84,13 @@ function requireTimezoneId(value) {
 
 function requireStatusId(status) {
     return normalizedText(status, "Task status", 100)
+}
+
+function requireTaskPriority(priority) {
+    if (TASK_PRIORITIES.indexOf(priority) === -1) {
+        fail("Task priority must be none, urgent, high, medium, or low.")
+    }
+    return priority
 }
 
 function requireProvider(value) {
@@ -1036,7 +1044,7 @@ function listTasks(filter) {
             "SELECT tasks.id AS taskId, tasks.category_id AS categoryId, categories.workspace_id AS workspaceId, " +
             "categories.name AS categoryName, " +
             "categories.color AS categoryColor, categories.collapsed AS categoryCollapsed, workflow_statuses.name AS statusName, tasks.title, tasks.details, " +
-            "tasks.status, tasks.position, tasks.archived_at_utc AS archivedAtUtc, " +
+            "tasks.status, tasks.priority, tasks.position, tasks.archived_at_utc AS archivedAtUtc, " +
             "tasks.tracked_seconds AS trackedSeconds, " +
             "active_session.started_at_utc AS activeStartedAt " +
             "FROM tasks JOIN categories ON categories.id = tasks.category_id " +
@@ -1189,14 +1197,15 @@ function createTask(input) {
         const timestamp = nowUtc()
         const task = {
             id: newId(), categoryId: categoryId, title: title, details: details, status: status,
+            priority: requireTaskPriority(input.priority === undefined ? "none" : input.priority),
             position: nextPosition(tx, "tasks", "WHERE category_id = ?", [categoryId]),
             archivedAtUtc: null, completedAtUtc: workflowStatusById(tx, category.workspace_id, status).is_completed === 1 ? timestamp : null,
             createdAtUtc: timestamp, updatedAtUtc: timestamp
         }
         tx.executeSql(
-            "INSERT INTO tasks (id, category_id, title, details, status, position, archived_at_utc, completed_at_utc, created_at_utc, updated_at_utc) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            [task.id, task.categoryId, task.title, task.details, task.status, task.position, task.archivedAtUtc,
+            "INSERT INTO tasks (id, category_id, title, details, status, priority, position, archived_at_utc, completed_at_utc, created_at_utc, updated_at_utc) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [task.id, task.categoryId, task.title, task.details, task.status, task.priority, task.position, task.archivedAtUtc,
              task.completedAtUtc, task.createdAtUtc, task.updatedAtUtc]
         )
         tx.executeSql(
@@ -1215,11 +1224,12 @@ function updateTask(input) {
         const task = taskById(tx, taskId)
         const title = input.title === undefined ? task.title : normalizedText(input.title, "Task title", 200)
         const details = input.details === undefined ? task.details : input.details
+        const priority = input.priority === undefined ? task.priority : requireTaskPriority(input.priority)
         if (typeof details !== "string" || codePointLength(details) > 20000) {
             fail("Task details must contain no more than 20,000 characters.")
         }
-        tx.executeSql("UPDATE tasks SET title = ?, details = ?, updated_at_utc = ? WHERE id = ?", [title, details, nowUtc(), taskId])
-        return { id: taskId, title: title, details: details }
+        tx.executeSql("UPDATE tasks SET title = ?, details = ?, priority = ?, updated_at_utc = ? WHERE id = ?", [title, details, priority, nowUtc(), taskId])
+        return { id: taskId, title: title, details: details, priority: priority }
     })
 }
 
@@ -1235,6 +1245,7 @@ function saveTask(input) {
     }
     return write(function(tx) {
         const task = taskById(tx, taskId)
+        const priority = input.priority === undefined ? task.priority : requireTaskPriority(input.priority)
         const currentCategory = activeCategoryById(tx, task.category_id)
         const category = activeCategoryById(tx, categoryId)
         requireStatusForWorkspace(tx, category.workspace_id, status)
@@ -1248,8 +1259,8 @@ function saveTask(input) {
             position = positionForMove(tx, categoryId, taskId, null, "before")
         }
         tx.executeSql(
-            "UPDATE tasks SET title = ?, details = ?, category_id = ?, position = ?, updated_at_utc = ? WHERE id = ?",
-            [title, details, categoryId, position, timestamp, taskId]
+            "UPDATE tasks SET title = ?, details = ?, priority = ?, category_id = ?, position = ?, updated_at_utc = ? WHERE id = ?",
+            [title, details, priority, categoryId, position, timestamp, taskId]
         )
         if (task.status !== status) {
             tx.executeSql(

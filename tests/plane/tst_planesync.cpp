@@ -19,7 +19,7 @@ private slots:
     void rejectsInvalidBaseUrl();
     void rejectsPlainHttpBaseUrl();
     void rejectsEmptyWorkspaceAndTraversalPath();
-    void rejectsEmptyTitleAndInvalidAssignees();
+    void rejectsEmptyTitleInvalidPriorityAndInvalidAssignees();
     void previewsWorkspaceEndpointWithoutProject();
     void decodesSuccessfulPlanePayloads();
     void decodesFailuresWithoutLeakingLargePayloads();
@@ -65,8 +65,18 @@ void PlaneSyncTest::onlyAllowsManagedFields()
 {
     PlaneSync sync;
     const QVariantMap request = sync.requestPreview("PATCH", "https://api.plane.so", "work", "project", "/work-items/id/", {{"priority", "high"}});
-    QVERIFY(!request.value("ok").toBool());
-    QVERIFY(request.value("error").toString().contains("not managed"));
+    QVERIFY(request.value("ok").toBool());
+    QCOMPARE(request.value("body").toMap().value("priority").toString(), QStringLiteral("high"));
+
+    const QVariantMap unmanaged = sync.requestPreview("PATCH", "https://api.plane.so", "work", "project", "/work-items/id/", {{"labels", QVariantList{}}});
+    QVERIFY(!unmanaged.value("ok").toBool());
+    QVERIFY(unmanaged.value("error").toString().contains("not managed"));
+
+    const QVariantMap externalReference = sync.requestPreview(
+        "POST", "https://api.plane.so", "work", "project", "/work-items/",
+        {{"name", "item"}, {"external_source", "io.github.ownisticapps.worktodo"}, {"external_id", "local-task-id"}});
+    QVERIFY(externalReference.value("ok").toBool());
+    QCOMPARE(externalReference.value("body").toMap().value("external_id").toString(), QStringLiteral("local-task-id"));
 }
 
 void PlaneSyncTest::rejectsInvalidBaseUrl()
@@ -100,7 +110,7 @@ void PlaneSyncTest::rejectsEmptyWorkspaceAndTraversalPath()
     QVERIFY(traversal.value("error").toString().contains("endpoint"));
 }
 
-void PlaneSyncTest::rejectsEmptyTitleAndInvalidAssignees()
+void PlaneSyncTest::rejectsEmptyTitleInvalidPriorityAndInvalidAssignees()
 {
     PlaneSync sync;
 
@@ -108,6 +118,11 @@ void PlaneSyncTest::rejectsEmptyTitleAndInvalidAssignees()
         "POST", "https://api.plane.so", "work", "project", "/work-items/", {{"name", "  "}});
     QVERIFY(!emptyTitle.value("ok").toBool());
     QVERIFY(emptyTitle.value("error").toString().contains("title"));
+
+    const QVariantMap invalidPriority = sync.requestPreview(
+        "PATCH", "https://api.plane.so", "work", "project", "/work-items/item/", {{"priority", "important"}});
+    QVERIFY(!invalidPriority.value("ok").toBool());
+    QVERIFY(invalidPriority.value("error").toString().contains("priority"));
 
     const QVariantMap invalidAssignees = sync.requestPreview(
         "PATCH", "https://api.plane.so", "work", "project", "/work-items/item/", {{"assignees", "member-1"}});
@@ -236,6 +251,7 @@ void PlaneSyncTest::publicOperationsRejectInvalidConnectionAsynchronously()
         sync.fetchStates({}, "invalid", "workspace", "project"),
         sync.fetchMembers({}, "invalid", "workspace", "project"),
         sync.fetchWorkItem({}, "invalid", "workspace", "project", "item"),
+        sync.findWorkItemsByExternalReference({}, "invalid", "workspace", "project", "source", "id"),
         sync.pullAssigned({}, "invalid", "workspace", "member", "cursor"),
         sync.createWorkItem({}, "invalid", "workspace", "project", {{"name", "item"}}),
         sync.updateWorkItem({}, "invalid", "workspace", "project", "item", {{"name", "item"}})
@@ -264,6 +280,7 @@ void PlaneSyncTest::deterministicTransportCoversRequestMethods()
         sync.fetchStates("test-connection", "https://plane.example", "workspace", "project"),
         sync.fetchMembers("test-connection", "https://plane.example", "workspace", "project"),
         sync.fetchWorkItem("test-connection", "https://plane.example", "workspace", "project", "item"),
+        sync.findWorkItemsByExternalReference("test-connection", "https://plane.example", "workspace", "project", "source", "id"),
         sync.pullAssigned("test-connection", "https://plane.example", "workspace", "member", "cursor"),
         sync.createWorkItem("test-connection", "https://plane.example", "workspace", "project", {{"name", "item"}}),
         sync.updateWorkItem("test-connection", "https://plane.example", "workspace", "project", "item", {{"name", "item"}})

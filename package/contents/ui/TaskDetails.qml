@@ -19,6 +19,7 @@ FocusScope {
     property string loadedDescription: ""
     property string loadedCategoryId: ""
     property string loadedStatus: ""
+    property string loadedPriority: "none"
     property bool showDescriptionPreview: false
     property bool manualSessionOpen: false
     property bool manualSessionLongConfirmed: false
@@ -32,6 +33,7 @@ FocusScope {
         || descriptionField.text !== root.loadedDescription
         || root.selectedCategoryId() !== root.loadedCategoryId
         || statusField.currentValue !== root.loadedStatus
+        || priorityField.currentValue !== root.loadedPriority
         || JSON.stringify(root.planeAssigneeIds) !== JSON.stringify(root.planeLink ? root.planeLink.assigneeIds : [])
     )
     readonly property bool hasManualCorrections: root.task && (
@@ -63,9 +65,11 @@ FocusScope {
         root.loadedDescription = root.task.details
         root.loadedCategoryId = root.task.category_id
         root.loadedStatus = root.task.status
+        root.loadedPriority = root.task.priority
         root.refreshDailyTimeline()
         showDescriptionPreview = false
         statusField.currentIndex = statusField.indexOfValue(root.task.status)
+        priorityField.currentIndex = priorityField.indexOfValue(root.task.priority)
         categoryField.currentIndex = -1
         for (let index = 0; index < root.board.categories.count; index += 1) {
             if (root.board.categories.get(index).id === root.task.category_id) {
@@ -101,7 +105,8 @@ FocusScope {
             title: titleField.text,
             details: descriptionField.text,
             categoryId: categoryId,
-            status: statusField.currentValue
+            status: statusField.currentValue,
+            priority: priorityField.currentValue
         })
         root.task = Database.getTask(root.taskId)
         root.planeLink = Database.getTaskExternalLink(root.taskId)
@@ -109,6 +114,7 @@ FocusScope {
         root.loadedDescription = root.task.details
         root.loadedCategoryId = root.task.category_id
         root.loadedStatus = root.task.status
+        root.loadedPriority = root.task.priority
         root.board.reload()
         root.board.syncPlaneTask(root.taskId, root.planeAssigneeIds)
     }
@@ -552,6 +558,31 @@ FocusScope {
                         textRole: "name"
                         valueRole: "id"
                         Accessible.name: i18n("Task status")
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    PlasmaComponents.Label {
+                        text: i18n("Priority")
+                        color: Kirigami.Theme.disabledTextColor
+                    }
+
+                    PlasmaComponents.ComboBox {
+                        id: priorityField
+                        Layout.fillWidth: true
+                        model: [
+                            { id: "none", name: i18n("None") },
+                            { id: "urgent", name: i18n("Urgent") },
+                            { id: "high", name: i18n("High") },
+                            { id: "medium", name: i18n("Medium") },
+                            { id: "low", name: i18n("Low") }
+                        ]
+                        textRole: "name"
+                        valueRole: "id"
+                        Accessible.name: i18n("Task priority")
                     }
                 }
             }

@@ -24,8 +24,8 @@ TestCase {
             Migrations.apply(tx, "2026-01-02T00:00:00.000Z")
 
             const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
-            compare(versions.rows.length, 12)
-            compare(versions.rows.item(11).version, 12)
+            compare(versions.rows.length, 13)
+            compare(versions.rows.item(12).version, 13)
             const categoryColumns = tx.executeSql("PRAGMA table_info(categories)")
             let hasTrashColumn = false
             for (let index = 0; index < categoryColumns.rows.length; index += 1) {
@@ -44,6 +44,12 @@ TestCase {
                 hasTrackedSecondsColumn = hasTrackedSecondsColumn || taskColumns.rows.item(index).name === "tracked_seconds"
             }
             verify(hasTrackedSecondsColumn)
+            let hasPriorityColumn = false
+            for (let index = 0; index < taskColumns.rows.length; index += 1) {
+                hasPriorityColumn = hasPriorityColumn || taskColumns.rows.item(index).name === "priority"
+            }
+            verify(hasPriorityColumn)
+            compare(tx.executeSql("SELECT priority FROM tasks WHERE id = 'legacy-task'").rows.item(0).priority, "none")
             const activeTimerIndex = tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'one_active_work_session_idx'")
             compare(activeTimerIndex.rows.length, 0)
             const externalTasks = tx.executeSql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'external_tasks'")
@@ -76,8 +82,8 @@ TestCase {
 
             Migrations.apply(tx, "2026-01-03T00:00:00.000Z")
             const repeatedVersions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
-            compare(repeatedVersions.rows.length, 12)
-            compare(repeatedVersions.rows.item(11).version, 12)
+            compare(repeatedVersions.rows.length, 13)
+            compare(repeatedVersions.rows.item(12).version, 13)
         })
     }
 
@@ -106,7 +112,7 @@ TestCase {
             "workbench-migration-newer-" + Date.now(), "1.0", "newer migration test", 1024 * 1024)
         database.transaction(function(tx) {
             tx.executeSql("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at_utc TEXT NOT NULL)")
-            for (let version = 1; version <= 13; version += 1) {
+            for (let version = 1; version <= 14; version += 1) {
                 tx.executeSql("INSERT INTO schema_migrations (version, applied_at_utc) VALUES (?, ?)",
                     [version, "2026-01-01T00:00:00.000Z"])
             }
@@ -119,8 +125,8 @@ TestCase {
             }
             verify(message.indexOf("newer version") >= 0)
             const versions = tx.executeSql("SELECT version FROM schema_migrations ORDER BY version")
-            compare(versions.rows.length, 13)
-            compare(versions.rows.item(12).version, 13)
+            compare(versions.rows.length, 14)
+            compare(versions.rows.item(13).version, 14)
         })
     }
 }
